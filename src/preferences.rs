@@ -201,9 +201,6 @@ impl PrefsController {
         rows_stack.setOrientation(NSUserInterfaceLayoutOrientation::Vertical);
         rows_stack.setSpacing(8.0);
 
-        let content_view = NSView::initWithFrame(NSView::alloc(mtm), frame);
-        window.setContentView(Some(&content_view));
-
         let search = TimezoneSearch::new();
         let combo_items: Vec<String> =
             search.combo_items().into_iter().map(String::from).collect();
@@ -211,7 +208,7 @@ impl PrefsController {
 
         let rows = RefCell::new(Vec::new());
         let this = Self::alloc(mtm).set_ivars(PrefsControllerIvars {
-            window,
+            window: window.retain(),
             rows_stack,
             rows,
             combo_data_source,
@@ -246,7 +243,7 @@ impl PrefsController {
         outer_stack.addArrangedSubview(&controller.ivars().rows_stack);
         outer_stack.addArrangedSubview(&button_row);
 
-        content_view.addSubview(&outer_stack);
+        window.setContentView(Some(&outer_stack));
 
         controller
     }
@@ -278,6 +275,7 @@ impl PrefsController {
         handle.setBezeled(false);
         handle.setDrawsBackground(false);
         handle.setAlignment(objc2_app_kit::NSTextAlignment::Center);
+        handle.setTranslatesAutoresizingMaskIntoConstraints(false);
         // Fixed width for handle
         unsafe {
             let constraint = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
@@ -289,31 +287,20 @@ impl PrefsController {
                 1.0,
                 20.0
             );
-            let _: () = msg_send![&handle, addConstraint: &*constraint];
+            handle.addConstraint(&*constraint);
         }
 
         // 2. Fields
         let label_field = create_text_field(mtm, "Label", label);
         let iana_combo = create_timezone_combo(mtm, iana_id, &ivars.combo_data_source);
 
+        label_field.setTranslatesAutoresizingMaskIntoConstraints(false);
+        iana_combo.setTranslatesAutoresizingMaskIntoConstraints(false);
+
         let delegate: &AnyObject = self;
         unsafe {
             let _: () = msg_send![&label_field, setDelegate: delegate];
             let _: () = msg_send![&iana_combo, setDelegate: delegate];
-        }
-
-        // Fix layout: make both fields equal width
-        unsafe {
-            let constraint = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
-                &iana_combo,
-                objc2_app_kit::NSLayoutAttribute::Width,
-                objc2_app_kit::NSLayoutRelation::Equal,
-                Some(&label_field),
-                objc2_app_kit::NSLayoutAttribute::Width,
-                1.0,
-                0.0
-            );
-            let _: () = msg_send![&iana_combo, addConstraint: &*constraint];
         }
 
         // 3. Delete Button
@@ -327,6 +314,7 @@ impl PrefsController {
         };
         delete_btn.setBezelStyle(objc2_app_kit::NSBezelStyle::RegularSquare);
         delete_btn.setBordered(false);
+        delete_btn.setTranslatesAutoresizingMaskIntoConstraints(false);
 
         // Fixed width for delete button
         unsafe {
@@ -339,13 +327,27 @@ impl PrefsController {
                 1.0,
                 24.0
             );
-            let _: () = msg_send![&delete_btn, addConstraint: &*constraint];
+            delete_btn.addConstraint(&*constraint);
         }
 
         row_stack.addArrangedSubview(&handle);
         row_stack.addArrangedSubview(&label_field);
         row_stack.addArrangedSubview(&iana_combo);
         row_stack.addArrangedSubview(&delete_btn);
+
+        // Fix layout: make both fields equal width. Must be added to row_stack AFTER subviews are added.
+        unsafe {
+            let constraint = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
+                &iana_combo,
+                objc2_app_kit::NSLayoutAttribute::Width,
+                objc2_app_kit::NSLayoutRelation::Equal,
+                Some(&label_field),
+                objc2_app_kit::NSLayoutAttribute::Width,
+                1.0,
+                0.0
+            );
+            row_stack.addConstraint(&*constraint);
+        }
 
         ivars.rows_stack.addArrangedSubview(&row_stack);
         ivars.rows.borrow_mut().push(EntryRow {
@@ -537,7 +539,7 @@ define_class!(
     impl DragHandle {
         #[unsafe(method(mouseDown:))]
         unsafe fn mouse_down(&self, event: &objc2_app_kit::NSEvent) {
-            let _mtm = MainThreadMarker::from(self);
+            let mtm = MainThreadMarker::from(self);
             let view: &NSView = self;
 
             // Find our row index
