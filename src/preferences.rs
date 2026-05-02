@@ -10,7 +10,7 @@ use objc2::{
 use objc2_app_kit::{
     NSBackingStoreType, NSButton, NSComboBox, NSDragOperation, NSDraggingContext,
     NSDraggingDestination, NSDraggingInfo, NSDraggingItem, NSDraggingSession, NSDraggingSource,
-    NSImage, NSPasteboard, NSPasteboardWriting, NSStackView, NSStackViewDistribution, NSTextField,
+    NSImage, NSPasteboard, NSStackView, NSStackViewDistribution, NSTextField,
     NSTextFieldBezelStyle, NSUserInterfaceLayoutOrientation, NSView, NSWindow, NSWindowStyleMask,
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
@@ -223,8 +223,6 @@ impl PrefsController {
         unsafe {
             let types = objc2_foundation::NSArray::from_retained_slice(&[row_drag_type()]);
             let _: () = msg_send![&controller.ivars().rows_stack, registerForDraggedTypes: &*types];
-            let delegate: &AnyObject = &controller;
-            let _: () = msg_send![&controller.ivars().rows_stack, setDelegate: delegate];
         }
 
         for entry in entries {
@@ -255,7 +253,8 @@ impl PrefsController {
 
     pub fn show(&self) {
         self.ivars().window.makeKeyAndOrderFront(None);
-        let app = objc2_app_kit::NSApplication::sharedApplication(MainThreadMarker::from(self));
+        let mtm = MainThreadMarker::from(self);
+        let app = objc2_app_kit::NSApplication::sharedApplication(mtm);
         app.activate();
     }
 
@@ -558,13 +557,14 @@ define_class!(
 
             let pboard = NSPasteboard::generalPasteboard();
             pboard.clearContents();
-            let pboard_writing: &ProtocolObject<dyn NSPasteboardWriting> = unsafe { std::mem::transmute(&*row_drag_type()) };
-            pboard.writeObjects(&objc2_foundation::NSArray::from_retained_slice(&[pboard_writing.retain()]));
+            let drag_type = row_drag_type();
+            let pboard_writing = ProtocolObject::from_retained(drag_type);
+            pboard.writeObjects(&objc2_foundation::NSArray::from_retained_slice(&[pboard_writing.clone()]));
             pboard.setString_forType(&NSString::from_str(&row_idx.to_string()), &row_drag_type());
 
             let drag_image = NSImage::initWithSize(NSImage::alloc(), CGSize::new(16.0, 16.0));
 
-            let item = NSDraggingItem::initWithPasteboardWriter(NSDraggingItem::alloc(), pboard_writing);
+            let item = NSDraggingItem::initWithPasteboardWriter(NSDraggingItem::alloc(), &*pboard_writing);
             unsafe { item.setDraggingFrame_contents(view.bounds(), Some(&drag_image)) };
 
             let items = objc2_foundation::NSArray::from_retained_slice(&[item]);
