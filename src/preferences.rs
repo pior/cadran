@@ -572,7 +572,7 @@ define_class!(
             let items = objc2_foundation::NSArray::from_retained_slice(&[item]);
             let dragging_source: &ProtocolObject<dyn NSDraggingSource> = ProtocolObject::from_ref(self);
             unsafe {
-                let _: () = msg_send![view, beginDraggingSessionWithItems: &*items, event: event, source: dragging_source];
+                let _: Retained<NSDraggingSession> = msg_send![view, beginDraggingSessionWithItems: &*items, event: event, source: dragging_source];
             }
         }
     }
