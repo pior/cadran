@@ -49,15 +49,16 @@ impl TimezoneEntry {
     }
 }
 
-fn relative_day_label(local: &Zoned, other: &Zoned) -> &'static str {
-    let local_date = local.date();
-    let other_date = other.date();
+fn relative_day_label(now: &Zoned, target: &Zoned) -> &'static str {
+    let now_at_target = now.with_time_zone(target.time_zone().clone());
+    let date_now = now_at_target.date();
+    let date_target = target.date();
 
-    if other_date == local_date {
+    if date_target == date_now {
         "Today"
-    } else if other_date == local_date.tomorrow().expect("valid date") {
+    } else if date_target == date_now.tomorrow().expect("valid date") {
         "Tomorrow"
-    } else if other_date == local_date.yesterday().expect("valid date") {
+    } else if date_target == date_now.yesterday().expect("valid date") {
         "Yesterday"
     } else {
         ""

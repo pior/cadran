@@ -1,19 +1,27 @@
 use std::cell::RefCell;
 
 use objc2::rc::Retained;
-use objc2::runtime::AnyObject;
+use objc2::runtime::{AnyObject, Bool, ProtocolObject};
 use objc2::sel;
-use objc2::{define_class, msg_send, DefinedClass, MainThreadMarker, MainThreadOnly};
+use objc2::{
+    define_class, msg_send, AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly,
+    Message,
+};
 use objc2_app_kit::{
-    NSBackingStoreType, NSButton, NSComboBox, NSStackView, NSStackViewDistribution, NSTextField,
+    NSBackingStoreType, NSButton, NSComboBox, NSDragOperation, NSDraggingDestination,
+    NSDraggingInfo, NSImage, NSPasteboard, NSStackView, NSStackViewDistribution, NSTextField,
     NSTextFieldBezelStyle, NSUserInterfaceLayoutOrientation, NSView, NSWindow, NSWindowStyleMask,
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
-use objc2_foundation::{ns_string, NSInteger, NSObject, NSObjectProtocol, NSString};
+use objc2_foundation::{ns_string, NSInteger, NSNotification, NSObject, NSObjectProtocol, NSString};
 
 use crate::search::{self, TimezoneSearch};
 use crate::settings;
 use crate::timezone::TimezoneEntry;
+
+fn row_drag_type() -> Retained<NSString> {
+    ns_string!("com.pior.clock.row").retain()
+}
 
 // -- ComboBoxDataSource: case-insensitive prefix completion --
 
@@ -61,7 +69,7 @@ define_class!(
                 .find(|item| item.to_lowercase().starts_with(&query))
             {
                 Some(item) => Retained::autorelease_return(NSString::from_str(item)),
-                None => std::ptr::null_mut(),
+                None => std::ptr::null_mut()
             }
         }
     }
@@ -79,6 +87,7 @@ impl ComboDataSource {
 }
 
 struct EntryRow {
+    view: Retained<NSView>,
     label_field: Retained<NSTextField>,
     iana_combo: Retained<NSComboBox>,
 }
@@ -91,22 +100,61 @@ define_class!(
 
     unsafe impl NSObjectProtocol for PrefsController {}
 
+    unsafe impl NSDraggingDestination for PrefsController {
+        #[unsafe(method(draggingEntered:))]
+        fn dragging_entered(&self, sender: &NSObject) -> NSDragOperation {
+            let info: &ProtocolObject<dyn NSDraggingInfo> = unsafe { std::mem::transmute(sender) };
+            let pboard = info.draggingPasteboard();
+            let types = objc2_foundation::NSArray::from_retained_slice(&[row_drag_type()]);
+            if pboard.availableTypeFromArray(&types).is_some() {
+                NSDragOperation::Move
+            } else {
+                NSDragOperation::None
+            }
+        }
+
+        #[unsafe(method(performDragOperation:))]
+        fn perform_drag_operation(&self, sender: &NSObject) -> Bool {
+            let info: &ProtocolObject<dyn NSDraggingInfo> = unsafe { std::mem::transmute(sender) };
+            let pboard = info.draggingPasteboard();
+            let point = info.draggingLocation();
+            let view_point = self.ivars().rows_stack.convertPoint_fromView(point, None);
+
+            if let Some(src_idx_str) = pboard.stringForType(&row_drag_type()) {
+                let src_idx: usize = src_idx_str.to_string().parse().unwrap_or(0);
+                self.do_reorder(src_idx, view_point);
+                return Bool::YES;
+            }
+            Bool::NO
+        }
+    }
+
     impl PrefsController {
+        #[unsafe(method(controlTextDidChange:))]
+        fn control_text_did_change(&self, _notification: &NSNotification) {
+            self.do_save();
+        }
+
+        #[unsafe(method(controlTextDidEndEditing:))]
+        fn control_text_did_end_editing(&self, _notification: &NSNotification) {
+            self.do_canonicalize();
+        }
+
+        #[unsafe(method(comboBoxSelectionDidChange:))]
+        fn combo_box_selection_did_change(&self, _notification: &NSNotification) {
+            self.do_canonicalize();
+        }
+
         #[unsafe(method(addEntry:))]
         unsafe fn add_entry(&self, _sender: &AnyObject) {
             let mtm = MainThreadMarker::from(self);
             self.do_add_entry(mtm);
         }
 
-        #[unsafe(method(removeLastEntry:))]
-        unsafe fn remove_last_entry(&self, _sender: &AnyObject) {
+        #[unsafe(method(removeEntry:))]
+        unsafe fn remove_entry(&self, sender: &NSButton) {
             let mtm = MainThreadMarker::from(self);
-            self.do_remove_last_entry(mtm);
-        }
-
-        #[unsafe(method(saveEntries:))]
-        unsafe fn save_entries(&self, _sender: &AnyObject) {
-            self.do_save();
+            self.do_remove_entry(mtm, sender);
         }
 
         #[unsafe(method(showWindow))]
@@ -170,6 +218,14 @@ impl PrefsController {
         });
         let controller: Retained<Self> = unsafe { msg_send![super(this), init] };
 
+        // Register for drag and drop
+        unsafe {
+            let types = objc2_foundation::NSArray::from_retained_slice(&[row_drag_type()]);
+            let _: () = msg_send![&controller.ivars().rows_stack, registerForDraggedTypes: &*types];
+            let delegate: &AnyObject = &controller;
+            let _: () = msg_send![&controller.ivars().rows_stack, setDelegate: delegate];
+        }
+
         for entry in entries {
             controller.do_add_entry_with(mtm, &entry.label, entry.iana_id());
         }
@@ -212,33 +268,162 @@ impl PrefsController {
         let row_stack = NSStackView::new(mtm);
         row_stack.setOrientation(NSUserInterfaceLayoutOrientation::Horizontal);
         row_stack.setSpacing(8.0);
-        row_stack.setDistribution(NSStackViewDistribution::FillEqually);
+        row_stack.setDistribution(NSStackViewDistribution::Fill);
 
+        // 1. Drag Handle
+        let handle = DragHandle::new(mtm);
+        handle.setStringValue(ns_string!("≡"));
+        handle.setEditable(false);
+        handle.setSelectable(false);
+        handle.setBezeled(false);
+        handle.setDrawsBackground(false);
+        handle.setAlignment(objc2_app_kit::NSTextAlignment::Center);
+        // Fixed width for handle
+        unsafe {
+            let constraint = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
+                &handle,
+                objc2_app_kit::NSLayoutAttribute::Width,
+                objc2_app_kit::NSLayoutRelation::Equal,
+                None,
+                objc2_app_kit::NSLayoutAttribute::NotAnAttribute,
+                1.0,
+                20.0
+            );
+            let _: () = msg_send![&handle, addConstraint: &*constraint];
+        }
+
+        // 2. Fields
         let label_field = create_text_field(mtm, "Label", label);
         let iana_combo = create_timezone_combo(mtm, iana_id, &ivars.combo_data_source);
 
+        let delegate: &AnyObject = self;
+        unsafe {
+            let _: () = msg_send![&label_field, setDelegate: delegate];
+            let _: () = msg_send![&iana_combo, setDelegate: delegate];
+        }
+
+        // 3. Delete Button
+        let delete_btn = unsafe {
+            NSButton::buttonWithTitle_target_action(
+                ns_string!("✕"),
+                Some(delegate),
+                Some(sel!(removeEntry:)),
+                mtm,
+            )
+        };
+        delete_btn.setBezelStyle(objc2_app_kit::NSBezelStyle::RegularSquare);
+        delete_btn.setBordered(false);
+
+        // Fixed width for delete button
+        unsafe {
+            let constraint = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
+                &delete_btn,
+                objc2_app_kit::NSLayoutAttribute::Width,
+                objc2_app_kit::NSLayoutRelation::Equal,
+                None,
+                objc2_app_kit::NSLayoutAttribute::NotAnAttribute,
+                1.0,
+                24.0
+            );
+            let _: () = msg_send![&delete_btn, addConstraint: &*constraint];
+        }
+
+        row_stack.addArrangedSubview(&handle);
         row_stack.addArrangedSubview(&label_field);
         row_stack.addArrangedSubview(&iana_combo);
+        row_stack.addArrangedSubview(&delete_btn);
 
         ivars.rows_stack.addArrangedSubview(&row_stack);
         ivars.rows.borrow_mut().push(EntryRow {
+            view: Retained::into_super(row_stack),
             label_field,
             iana_combo,
         });
     }
 
-    fn do_remove_last_entry(&self, _mtm: MainThreadMarker) {
+    fn do_remove_entry(&self, _mtm: MainThreadMarker, sender: &NSButton) {
         let ivars = self.ivars();
         let mut rows = ivars.rows.borrow_mut();
-        if rows.is_empty() {
+
+        // Find which row contains this button
+        let mut found_idx = None;
+        for (idx, row) in rows.iter().enumerate() {
+            if unsafe { row.view.isDescendantOf(&sender.superview().unwrap()) } {
+                found_idx = Some(idx);
+                break;
+            }
+        }
+
+        if let Some(idx) = found_idx {
+            let row = rows.remove(idx);
+            ivars.rows_stack.removeArrangedSubview(&row.view);
+            row.view.removeFromSuperview();
+            self.do_save();
+        }
+    }
+
+    fn do_reorder(&self, src_idx: usize, point: CGPoint) {
+        let ivars = self.ivars();
+        let mut rows = ivars.rows.borrow_mut();
+        if src_idx >= rows.len() {
             return;
         }
-        rows.pop();
+
+        // Determine destination index based on drop point
+        let mut dest_idx = 0;
         let subviews = ivars.rows_stack.arrangedSubviews();
-        if let Some(last) = subviews.lastObject() {
-            ivars.rows_stack.removeArrangedSubview(&last);
-            last.removeFromSuperview();
+        for i in 0..subviews.count() {
+            let view: Retained<NSView> = subviews.objectAtIndex(i).downcast().unwrap();
+            let frame = view.frame();
+            if point.y > frame.origin.y + frame.size.height / 2.0 {
+                dest_idx = i as usize;
+                break;
+            }
+            dest_idx = (i + 1) as usize;
         }
+
+        if dest_idx > rows.len() {
+            dest_idx = rows.len();
+        }
+
+        if src_idx == dest_idx || (dest_idx > 0 && src_idx == dest_idx - 1) {
+            return;
+        }
+
+        let row = rows.remove(src_idx);
+        let final_dest = if dest_idx > src_idx { dest_idx - 1 } else { dest_idx };
+        rows.insert(final_dest, row);
+
+        // Update StackView
+        let subviews = ivars.rows_stack.arrangedSubviews();
+        for i in (0..subviews.count()).rev() {
+            let view: Retained<NSView> = subviews.objectAtIndex(i).downcast().unwrap();
+            ivars.rows_stack.removeArrangedSubview(&view);
+        }
+
+        for row in rows.iter() {
+            ivars.rows_stack.addArrangedSubview(&row.view);
+        }
+
+        self.do_save();
+    }
+
+    fn do_canonicalize(&self) {
+        let ivars = self.ivars();
+        let rows = ivars.rows.borrow();
+
+        for row in rows.iter() {
+            let raw_value = row.iana_combo.stringValue().to_string();
+            let iana_id = search::iana_id_from_display(&raw_value);
+
+            if !iana_id.is_empty() && iana_id != raw_value {
+                if let Some(entry) = TimezoneEntry::try_new("", iana_id) {
+                    row.iana_combo
+                        .setStringValue(&NSString::from_str(entry.iana_id()));
+                }
+            }
+        }
+        self.do_save();
     }
 
     fn do_save(&self) {
@@ -255,8 +440,6 @@ impl PrefsController {
                 continue;
             }
             if let Some(entry) = TimezoneEntry::try_new(&label, iana_id) {
-                row.iana_combo
-                    .setStringValue(&NSString::from_str(entry.iana_id()));
                 entries.push(entry);
             }
         }
@@ -313,29 +496,68 @@ fn create_button_row(mtm: MainThreadMarker, target: &PrefsController) -> Retaine
         )
     };
 
-    let remove_btn = unsafe {
-        NSButton::buttonWithTitle_target_action(
-            ns_string!("\u{2212} Remove Last"),
-            Some(target_obj),
-            Some(sel!(removeLastEntry:)),
-            mtm,
-        )
-    };
-
-    let save_btn = unsafe {
-        NSButton::buttonWithTitle_target_action(
-            ns_string!("Save"),
-            Some(target_obj),
-            Some(sel!(saveEntries:)),
-            mtm,
-        )
-    };
-
     row.addArrangedSubview(&add_btn);
-    row.addArrangedSubview(&remove_btn);
-    let spacer = NSView::new(mtm);
-    row.addArrangedSubview(&spacer);
-    row.addArrangedSubview(&save_btn);
 
     row
+}
+
+define_class!(
+    #[unsafe(super(NSTextField))]
+    #[thread_kind = MainThreadOnly]
+    #[ivars = DragHandleIvars]
+    struct DragHandle;
+
+    unsafe impl NSObjectProtocol for DragHandle {}
+
+    impl DragHandle {
+        #[unsafe(method(mouseDown:))]
+        unsafe fn mouse_down(&self, event: &objc2_app_kit::NSEvent) {
+            let _mtm = MainThreadMarker::from(self);
+            let view: &NSView = self;
+            let window = view.window().unwrap();
+
+            // Find our row index
+            let mut row_idx = 0;
+            if let Some(superview) = unsafe { view.superview() } {
+                if let Some(stack) = unsafe { superview.superview() } {
+                    let stack: Retained<NSStackView> = stack.downcast().unwrap();
+                    let subviews = stack.arrangedSubviews();
+                    for i in 0..subviews.count() {
+                        if subviews.objectAtIndex(i).isEqual(Some(&superview)) {
+                            row_idx = i;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            let pboard = NSPasteboard::generalPasteboard();
+            pboard.clearContents();
+            pboard.setString_forType(&NSString::from_str(&row_idx.to_string()), &row_drag_type());
+
+            let drag_image = NSImage::initWithSize(NSImage::alloc(), CGSize::new(1.0, 1.0));
+
+            unsafe {
+                let _: () = msg_send![
+                    &window,
+                    dragImage: &*drag_image,
+                    at: view.frame().origin,
+                    offset: CGSize::new(0.0, 0.0),
+                    event: event,
+                    pasteboard: &*pboard,
+                    source: view,
+                    slideBack: Bool::YES
+                ];
+            }
+        }
+    }
+);
+
+struct DragHandleIvars {}
+
+impl DragHandle {
+    fn new(mtm: MainThreadMarker) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(DragHandleIvars {});
+        unsafe { msg_send![super(this), init] }
+    }
 }

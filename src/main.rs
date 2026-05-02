@@ -243,6 +243,56 @@ fn main() {
     let app = NSApplication::sharedApplication(mtm);
     app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
 
+    // Create a main menu with an Edit menu to enable standard shortcuts like Copy/Paste
+    let main_menu = NSMenu::new(mtm);
+
+    let edit_menu_item = NSMenuItem::new(mtm);
+    let edit_menu = NSMenu::new(mtm);
+    edit_menu.setTitle(ns_string!("Edit"));
+
+    let undo_item = NSMenuItem::new(mtm);
+    undo_item.setTitle(ns_string!("Undo"));
+    unsafe { undo_item.setAction(Some(sel!(undo:))) };
+    undo_item.setKeyEquivalent(ns_string!("z"));
+    edit_menu.addItem(&undo_item);
+
+    let redo_item = NSMenuItem::new(mtm);
+    redo_item.setTitle(ns_string!("Redo"));
+    unsafe { redo_item.setAction(Some(sel!(redo:))) };
+    redo_item.setKeyEquivalent(ns_string!("Z"));
+    edit_menu.addItem(&redo_item);
+
+    edit_menu.addItem(&NSMenuItem::separatorItem(mtm));
+
+    let cut_item = NSMenuItem::new(mtm);
+    cut_item.setTitle(ns_string!("Cut"));
+    unsafe { cut_item.setAction(Some(sel!(cut:))) };
+    cut_item.setKeyEquivalent(ns_string!("x"));
+    edit_menu.addItem(&cut_item);
+
+    let copy_item = NSMenuItem::new(mtm);
+    copy_item.setTitle(ns_string!("Copy"));
+    unsafe { copy_item.setAction(Some(sel!(copy:))) };
+    copy_item.setKeyEquivalent(ns_string!("c"));
+    edit_menu.addItem(&copy_item);
+
+    let paste_item = NSMenuItem::new(mtm);
+    paste_item.setTitle(ns_string!("Paste"));
+    unsafe { paste_item.setAction(Some(sel!(paste:))) };
+    paste_item.setKeyEquivalent(ns_string!("v"));
+    edit_menu.addItem(&paste_item);
+
+    let select_all_item = NSMenuItem::new(mtm);
+    select_all_item.setTitle(ns_string!("Select All"));
+    unsafe { select_all_item.setAction(Some(sel!(selectAll:))) };
+    select_all_item.setKeyEquivalent(ns_string!("a"));
+    edit_menu.addItem(&select_all_item);
+
+    edit_menu_item.setSubmenu(Some(&edit_menu));
+    main_menu.addItem(&edit_menu_item);
+
+    app.setMainMenu(Some(&main_menu));
+
     let delegate = AppDelegate::new(mtm);
     let object = ProtocolObject::from_ref(&*delegate);
     app.setDelegate(Some(object));
