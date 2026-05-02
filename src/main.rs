@@ -1,19 +1,23 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
+mod preferences;
+mod search;
 mod settings;
 mod timezone;
+
+use std::cell::RefCell;
 
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, ProtocolObject, Sel};
 use objc2::sel;
 use objc2::{define_class, msg_send, DefinedClass, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
-    NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSMenu, NSMenuItem,
-    NSStatusBar, NSStatusItem, NSVariableStatusItemLength,
+    NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSColor, NSFont, NSMenu,
+    NSMenuItem, NSStatusBar, NSStatusItem, NSTextAlignment, NSTextField, NSVariableStatusItemLength,
+    NSView,
 };
-use objc2_foundation::{
-    ns_string, NSNotification, NSObject, NSObjectProtocol, NSString, NSTimer,
-};
+use objc2_core_foundation::{CGPoint, CGRect, CGSize};
+use objc2_foundation::{ns_string, NSNotification, NSObject, NSObjectProtocol, NSString, NSTimer};
 
 use timezone::{default_entries, TimezoneEntry};
 
@@ -41,12 +45,28 @@ define_class!(
             self.update_display(mtm);
             self.schedule_timer(mtm);
         }
+
+        #[unsafe(method(showPreferences:))]
+        unsafe fn show_preferences(&self, _sender: &AnyObject) {
+            let mtm = MainThreadMarker::from(self);
+            self.open_preferences(mtm);
+        }
+
+        #[unsafe(method(reloadEntries:))]
+        unsafe fn reload_entries(&self, _sender: &AnyObject) {
+            let mtm = MainThreadMarker::from(self);
+            if let Some(entries) = settings::load_entries() {
+                *self.ivars().entries.borrow_mut() = entries;
+            }
+            self.update_display(mtm);
+        }
     }
 );
 
 struct AppDelegateIvars {
     status_item: Retained<NSStatusItem>,
-    entries: Vec<TimezoneEntry>,
+    entries: RefCell<Vec<TimezoneEntry>>,
+    prefs_controller: RefCell<Option<Retained<NSObject>>>,
 }
 
 impl AppDelegate {
@@ -58,17 +78,18 @@ impl AppDelegate {
 
         let this = Self::alloc(mtm).set_ivars(AppDelegateIvars {
             status_item,
-            entries,
+            entries: RefCell::new(entries),
+            prefs_controller: RefCell::new(None),
         });
         unsafe { msg_send![super(this), init] }
     }
 
     fn update_display(&self, mtm: MainThreadMarker) {
         let ivars = self.ivars();
+        let entries = ivars.entries.borrow();
         let now = jiff::Zoned::now();
 
-        // Update menu bar title
-        if let Some(first) = ivars.entries.first() {
+        if let Some(first) = entries.first() {
             let formatted = first.format(&now);
             let title = NSString::from_str(&format!("\u{1F310} {}", formatted.time));
             if let Some(button) = ivars.status_item.button(mtm) {
@@ -76,22 +97,32 @@ impl AppDelegate {
             }
         }
 
-        // Rebuild dropdown menu
         let menu = NSMenu::new(mtm);
+        menu.setAutoenablesItems(false);
 
-        for entry in &ivars.entries {
+        let menu_width = 250.0;
+        for entry in entries.iter() {
             let formatted = entry.format(&now);
-            let title = format!(
-                "{} \u{2014} {}    {}  {}",
-                formatted.label, formatted.city, formatted.time, formatted.relative_day,
-            );
-            let item = create_menu_item(mtm, &NSString::from_str(&title), None);
+            let time_text = if formatted.relative_day.is_empty() {
+                formatted.time.clone()
+            } else {
+                format!("{}  {}", formatted.time, formatted.relative_day)
+            };
+            let view = create_entry_view(mtm, &formatted.label, &time_text, menu_width);
+            let item = NSMenuItem::new(mtm);
+            item.setView(Some(&view));
             menu.addItem(&item);
         }
 
         menu.addItem(&NSMenuItem::separatorItem(mtm));
 
-        let preferences_item = create_menu_item(mtm, ns_string!("Preferences\u{2026}"), None);
+        let preferences_item = create_menu_item(
+            mtm,
+            ns_string!("Preferences\u{2026}"),
+            Some(sel!(showPreferences:)),
+        );
+        unsafe { preferences_item.setTarget(Some(self as &AnyObject)) };
+        preferences_item.setEnabled(true);
         menu.addItem(&preferences_item);
 
         menu.addItem(&NSMenuItem::separatorItem(mtm));
@@ -103,13 +134,40 @@ impl AppDelegate {
         ivars.status_item.setMenu(Some(&menu));
     }
 
+    fn open_preferences(&self, mtm: MainThreadMarker) {
+        let ivars = self.ivars();
+
+        // Reuse existing window if it exists
+        {
+            let controller_ref = ivars.prefs_controller.borrow();
+            if let Some(obj) = controller_ref.as_ref() {
+                let _: () = unsafe { msg_send![obj, showWindow] };
+                return;
+            }
+        }
+
+        let app_delegate_ptr = self as *const AppDelegate as usize;
+        let on_save = Box::new(move || {
+            let obj = app_delegate_ptr as *const AnyObject;
+            unsafe {
+                let _: () = msg_send![obj, reloadEntries: std::ptr::null::<AnyObject>()];
+            }
+        });
+
+        let controller = {
+            let entries = ivars.entries.borrow();
+            preferences::PrefsController::new(mtm, &entries, on_save)
+        };
+
+        controller.show();
+        *ivars.prefs_controller.borrow_mut() = Some(Retained::into_super(controller));
+    }
+
     fn schedule_timer(&self, _mtm: MainThreadMarker) {
         let now = jiff::Zoned::now();
         let seconds_past_minute = now.second() as f64 + now.subsec_nanosecond() as f64 / 1e9;
         let delay = 60.0 - seconds_past_minute;
 
-        // One-shot timer aligned to the next minute boundary;
-        // timerFired: re-schedules for the following minute.
         unsafe {
             NSTimer::scheduledTimerWithTimeInterval_target_selector_userInfo_repeats(
                 delay,
@@ -120,6 +178,52 @@ impl AppDelegate {
             );
         }
     }
+}
+
+fn create_entry_view(
+    mtm: MainThreadMarker,
+    label: &str,
+    time: &str,
+    width: f64,
+) -> Retained<NSView> {
+    let height = 22.0;
+    let padding = 14.0;
+    let view = NSView::initWithFrame(
+        NSView::alloc(mtm),
+        CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(width, height)),
+    );
+
+    let font = NSFont::menuFontOfSize(0.0);
+
+    let label_field = create_menu_label(mtm, label);
+    label_field.setFont(Some(&font));
+    label_field.setFrame(CGRect::new(
+        CGPoint::new(padding, 0.0),
+        CGSize::new(width * 0.6 - padding, height),
+    ));
+
+    let time_field = create_menu_label(mtm, time);
+    time_field.setFont(Some(&font));
+    time_field.setAlignment(NSTextAlignment::Right);
+    time_field.setTextColor(Some(&NSColor::secondaryLabelColor()));
+    time_field.setFrame(CGRect::new(
+        CGPoint::new(width * 0.6, 0.0),
+        CGSize::new(width * 0.4 - padding, height),
+    ));
+
+    view.addSubview(&label_field);
+    view.addSubview(&time_field);
+    view
+}
+
+fn create_menu_label(mtm: MainThreadMarker, text: &str) -> Retained<NSTextField> {
+    let field = NSTextField::new(mtm);
+    field.setStringValue(&NSString::from_str(text));
+    field.setEditable(false);
+    field.setBezeled(false);
+    field.setBordered(false);
+    field.setDrawsBackground(false);
+    field
 }
 
 fn create_menu_item(

@@ -8,7 +8,8 @@ const ENTRIES_KEY: &str = "timezone_entries";
 #[derive(Serialize, Deserialize)]
 struct StoredEntry {
     label: String,
-    city: String,
+    #[serde(default)]
+    city: Option<String>,
     iana_id: String,
 }
 
@@ -22,7 +23,7 @@ pub fn load_entries() -> Option<Vec<TimezoneEntry>> {
     Some(
         stored
             .into_iter()
-            .filter_map(|s| TimezoneEntry::try_new(&s.label, &s.city, &s.iana_id))
+            .filter_map(|s| TimezoneEntry::try_new(&s.label, &s.iana_id))
             .collect(),
     )
 }
@@ -32,7 +33,7 @@ pub fn save_entries(entries: &[TimezoneEntry]) {
         .iter()
         .map(|e| StoredEntry {
             label: e.label.clone(),
-            city: e.city.clone(),
+            city: None,
             iana_id: e.iana_id().to_string(),
         })
         .collect();

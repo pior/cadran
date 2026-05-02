@@ -3,34 +3,30 @@ use jiff::Zoned;
 
 pub struct TimezoneEntry {
     pub label: String,
-    pub city: String,
     tz: TimeZone,
     iana_id: String,
 }
 
 pub struct FormattedEntry {
     pub label: String,
-    pub city: String,
     pub time: String,
     pub relative_day: &'static str,
 }
 
 impl TimezoneEntry {
-    pub fn new(label: &str, city: &str, iana_id: &str) -> Self {
+    pub fn new(label: &str, iana_id: &str) -> Self {
         let tz = TimeZone::get(iana_id).expect("valid IANA timezone ID");
         Self {
             label: label.to_string(),
-            city: city.to_string(),
             tz,
             iana_id: iana_id.to_string(),
         }
     }
 
-    pub fn try_new(label: &str, city: &str, iana_id: &str) -> Option<Self> {
+    pub fn try_new(label: &str, iana_id: &str) -> Option<Self> {
         let tz = TimeZone::get(iana_id).ok()?;
         Some(Self {
             label: label.to_string(),
-            city: city.to_string(),
             tz,
             iana_id: iana_id.to_string(),
         })
@@ -47,7 +43,6 @@ impl TimezoneEntry {
 
         FormattedEntry {
             label: self.label.clone(),
-            city: self.city.clone(),
             time,
             relative_day,
         }
@@ -71,10 +66,10 @@ fn relative_day_label(local: &Zoned, other: &Zoned) -> &'static str {
 
 pub fn default_entries() -> Vec<TimezoneEntry> {
     vec![
-        TimezoneEntry::new("Sam", "London", "Europe/London"),
-        TimezoneEntry::new("Mika", "Tokyo", "Asia/Tokyo"),
-        TimezoneEntry::new("Ana", "New York", "America/New_York"),
-        TimezoneEntry::new("Priya", "Bangalore", "Asia/Kolkata"),
-        TimezoneEntry::new("Leo", "Sydney", "Australia/Sydney"),
+        TimezoneEntry::new("Sam", "Europe/London"),
+        TimezoneEntry::new("Mika", "Asia/Tokyo"),
+        TimezoneEntry::new("Ana", "America/New_York"),
+        TimezoneEntry::new("Priya", "Asia/Kolkata"),
+        TimezoneEntry::new("Leo", "Australia/Sydney"),
     ]
 }
