@@ -8,8 +8,9 @@ use objc2::{
     Message,
 };
 use objc2_app_kit::{
-    NSBackingStoreType, NSButton, NSComboBox, NSDragOperation, NSDraggingDestination,
-    NSDraggingInfo, NSImage, NSPasteboard, NSStackView, NSStackViewDistribution, NSTextField,
+    NSBackingStoreType, NSButton, NSComboBox, NSDragOperation, NSDraggingContext,
+    NSDraggingDestination, NSDraggingInfo, NSDraggingItem, NSDraggingSession, NSDraggingSource,
+    NSImage, NSPasteboard, NSPasteboardWriting, NSStackView, NSStackViewDistribution, NSTextField,
     NSTextFieldBezelStyle, NSUserInterfaceLayoutOrientation, NSView, NSWindow, NSWindowStyleMask,
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
@@ -302,6 +303,20 @@ impl PrefsController {
             let _: () = msg_send![&iana_combo, setDelegate: delegate];
         }
 
+        // Fix layout: make both fields equal width
+        unsafe {
+            let constraint = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
+                &iana_combo,
+                objc2_app_kit::NSLayoutAttribute::Width,
+                objc2_app_kit::NSLayoutRelation::Equal,
+                Some(&label_field),
+                objc2_app_kit::NSLayoutAttribute::Width,
+                1.0,
+                0.0
+            );
+            let _: () = msg_send![&iana_combo, addConstraint: &*constraint];
+        }
+
         // 3. Delete Button
         let delete_btn = unsafe {
             NSButton::buttonWithTitle_target_action(
@@ -509,12 +524,22 @@ define_class!(
 
     unsafe impl NSObjectProtocol for DragHandle {}
 
+    unsafe impl NSDraggingSource for DragHandle {
+        #[unsafe(method(draggingSession:sourceOperationMaskForDraggingContext:))]
+        fn dragging_session_source_operation_mask(
+            &self,
+            _session: &NSDraggingSession,
+            _context: NSDraggingContext,
+        ) -> NSDragOperation {
+            NSDragOperation::Move
+        }
+    }
+
     impl DragHandle {
         #[unsafe(method(mouseDown:))]
         unsafe fn mouse_down(&self, event: &objc2_app_kit::NSEvent) {
             let _mtm = MainThreadMarker::from(self);
             let view: &NSView = self;
-            let window = view.window().unwrap();
 
             // Find our row index
             let mut row_idx = 0;
@@ -533,21 +558,19 @@ define_class!(
 
             let pboard = NSPasteboard::generalPasteboard();
             pboard.clearContents();
+            let pboard_writing: &ProtocolObject<dyn NSPasteboardWriting> = unsafe { std::mem::transmute(&*row_drag_type()) };
+            pboard.writeObjects(&objc2_foundation::NSArray::from_retained_slice(&[pboard_writing.retain()]));
             pboard.setString_forType(&NSString::from_str(&row_idx.to_string()), &row_drag_type());
 
-            let drag_image = NSImage::initWithSize(NSImage::alloc(), CGSize::new(1.0, 1.0));
+            let drag_image = NSImage::initWithSize(NSImage::alloc(), CGSize::new(16.0, 16.0));
 
+            let item = NSDraggingItem::initWithPasteboardWriter(NSDraggingItem::alloc(), pboard_writing);
+            unsafe { item.setDraggingFrame_contents(view.bounds(), Some(&drag_image)) };
+
+            let items = objc2_foundation::NSArray::from_retained_slice(&[item]);
+            let dragging_source: &ProtocolObject<dyn NSDraggingSource> = ProtocolObject::from_ref(self);
             unsafe {
-                let _: () = msg_send![
-                    &window,
-                    dragImage: &*drag_image,
-                    at: view.frame().origin,
-                    offset: CGSize::new(0.0, 0.0),
-                    event: event,
-                    pasteboard: &*pboard,
-                    source: view,
-                    slideBack: Bool::YES
-                ];
+                let _: () = msg_send![view, beginDraggingSessionWithItems: &*items, event: event, source: dragging_source];
             }
         }
     }
