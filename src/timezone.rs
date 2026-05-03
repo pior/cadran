@@ -167,6 +167,5 @@ mod tests {
 pub fn default_entries() -> Vec<TimezoneEntry> {
     vec![
         TimezoneEntry::new("UTC", "UTC", true),
-        TimezoneEntry::new("Paris", "Europe/Paris", false),
     ]
 }

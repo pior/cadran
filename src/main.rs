@@ -120,6 +120,15 @@ impl AppDelegate {
         menu.setAutoenablesItems(false);
 
         let menu_width = 320.0;
+
+        let spacer = NSMenuItem::new(mtm);
+        let spacer_view = NSView::initWithFrame(
+            NSView::alloc(mtm),
+            CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(menu_width, 4.0)),
+        );
+        spacer.setView(Some(&spacer_view));
+        menu.addItem(&spacer);
+
         for entry in entries.iter() {
             let formatted = entry.format(&now);
             let view = create_entry_view(
