@@ -4,19 +4,20 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Bool, ProtocolObject, Sel};
 use objc2::sel;
 use objc2::{
-    define_class, msg_send, AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly,
-    Message,
+    define_class, msg_send, AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, Message,
 };
 use objc2_app_kit::{
-    NSBackingStoreType, NSButton, NSButtonType, NSColor, NSComboBox, NSDragOperation,
+    NSBackingStoreType, NSButton, NSButtonType, NSColor, NSComboBox, NSControl, NSDragOperation,
     NSDraggingContext, NSDraggingDestination, NSDraggingInfo, NSDraggingItem, NSDraggingSession,
-    NSControl, NSDraggingSource, NSImage, NSLayoutAttribute, NSLayoutRelation, NSPasteboardItem,
+    NSDraggingSource, NSFont, NSImage, NSLayoutAttribute, NSLayoutRelation, NSPasteboardItem,
     NSStackView, NSStackViewDistribution, NSTextField, NSTextFieldBezelStyle,
-    NSUserInterfaceLayoutOrientation, NSView, NSWindow, NSWindowStyleMask,
+    NSUserInterfaceLayoutOrientation, NSView, NSWindow, NSWindowStyleMask, NSWorkspace,
 };
 use objc2_app_kit::{NSControlStateValueOff, NSControlStateValueOn};
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
-use objc2_foundation::{ns_string, NSInteger, NSNotification, NSObject, NSObjectProtocol, NSString};
+use objc2_foundation::{
+    ns_string, NSInteger, NSNotification, NSObject, NSObjectProtocol, NSString, NSURL,
+};
 
 use crate::search::{self, TimezoneSearch};
 use crate::settings;
@@ -33,6 +34,14 @@ const IDX_LABEL: usize = 2;
 const IDX_TIMEZONE: usize = 3;
 const _IDX_DELETE: usize = 4;
 const ROW_SUBVIEW_COUNT: usize = 5;
+const MAX_ENTRY_ROWS: usize = 15;
+const PREF_WINDOW_WIDTH: f64 = 560.0;
+const ROW_HEIGHT: f64 = 56.0;
+const ADD_ROW_HEIGHT: f64 = 24.0;
+const FOOTER_HEIGHT: f64 = 20.0;
+const CONTENT_PADDING: f64 = 16.0;
+const SECTION_GAP: f64 = 10.0;
+const GITHUB_URL: &str = "https://github.com/pior/cadran";
 
 // -- ComboBoxDataSource: case-insensitive prefix completion --
 
@@ -202,6 +211,13 @@ define_class!(
             self.do_toggle_launch_at_login(sender);
         }
 
+        #[unsafe(method(openGitHub:))]
+        unsafe fn open_github(&self, _sender: &AnyObject) {
+            if let Some(url) = NSURL::URLWithString(&NSString::from_str(GITHUB_URL)) {
+                NSWorkspace::sharedWorkspace().openURL(&url);
+            }
+        }
+
         #[unsafe(method(showWindow))]
         unsafe fn show_window_objc(&self) {
             self.show();
@@ -227,10 +243,12 @@ impl PrefsController {
         entries: &[TimezoneEntry],
         on_save: Box<dyn Fn()>,
     ) -> Retained<Self> {
-        let frame = CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(560.0, 400.0));
-        let style = NSWindowStyleMask::Titled
-            | NSWindowStyleMask::Closable
-            | NSWindowStyleMask::Resizable;
+        let frame = CGRect::new(
+            CGPoint::new(0.0, 0.0),
+            CGSize::new(PREF_WINDOW_WIDTH, preferred_content_height(entries.len())),
+        );
+        let style =
+            NSWindowStyleMask::Titled | NSWindowStyleMask::Closable;
 
         let window = unsafe {
             NSWindow::initWithContentRect_styleMask_backing_defer(
@@ -241,7 +259,7 @@ impl PrefsController {
                 false,
             )
         };
-        window.setTitle(ns_string!("Cadran Preferences"));
+        window.setTitle(ns_string!("Cadran Settings"));
         window.center();
         unsafe { window.setReleasedWhenClosed(false) };
 
@@ -261,7 +279,10 @@ impl PrefsController {
             on_save,
         });
         let controller: Retained<Self> = unsafe { msg_send![super(this), init] };
-        rows_stack.ivars().controller.replace(Some(controller.retain()));
+        rows_stack
+            .ivars()
+            .controller
+            .replace(Some(controller.retain()));
 
         let add_row = create_add_button_row(mtm, &controller);
         rows_stack.addArrangedSubview(&add_row);
@@ -274,6 +295,8 @@ impl PrefsController {
 
         let launch_checkbox = create_launch_at_login_checkbox(mtm, &controller);
         launch_checkbox.setTranslatesAutoresizingMaskIntoConstraints(false);
+        let footer = create_footer(mtm, &controller);
+        footer.setTranslatesAutoresizingMaskIntoConstraints(false);
 
         let content_view = PrefsContentView::new(mtm);
         content_view.setTranslatesAutoresizingMaskIntoConstraints(false);
@@ -282,20 +305,20 @@ impl PrefsController {
 
         content_view.addSubview(&rows_stack);
         content_view.addSubview(&launch_checkbox);
+        content_view.addSubview(&footer);
 
-        let padding = 16.0;
         unsafe {
             let leading = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
                 &*rows_stack, NSLayoutAttribute::Leading, NSLayoutRelation::Equal,
-                Some(&*content_view), NSLayoutAttribute::Leading, 1.0, padding,
+                Some(&*content_view), NSLayoutAttribute::Leading, 1.0, CONTENT_PADDING,
             );
             let trailing = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
                 &*rows_stack, NSLayoutAttribute::Trailing, NSLayoutRelation::Equal,
-                Some(&*content_view), NSLayoutAttribute::Trailing, 1.0, -padding,
+                Some(&*content_view), NSLayoutAttribute::Trailing, 1.0, -CONTENT_PADDING,
             );
             let top = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
                 &*rows_stack, NSLayoutAttribute::Top, NSLayoutRelation::Equal,
-                Some(&*content_view), NSLayoutAttribute::Top, 1.0, padding,
+                Some(&*content_view), NSLayoutAttribute::Top, 1.0, CONTENT_PADDING,
             );
             let cb_center = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
                 &*launch_checkbox, NSLayoutAttribute::CenterX, NSLayoutRelation::Equal,
@@ -303,15 +326,37 @@ impl PrefsController {
             );
             let cb_top = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
                 &*launch_checkbox, NSLayoutAttribute::Top, NSLayoutRelation::Equal,
-                Some(&*rows_stack), NSLayoutAttribute::Bottom, 1.0, 16.0,
+                Some(&*rows_stack), NSLayoutAttribute::Bottom, 1.0, SECTION_GAP,
+            );
+            let footer_top = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
+                &*footer, NSLayoutAttribute::Top, NSLayoutRelation::Equal,
+                Some(&*launch_checkbox), NSLayoutAttribute::Bottom, 1.0, SECTION_GAP,
+            );
+            let footer_bottom = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
+                &*footer, NSLayoutAttribute::Bottom, NSLayoutRelation::Equal,
+                Some(&*content_view), NSLayoutAttribute::Bottom, 1.0, -CONTENT_PADDING,
+            );
+            let footer_leading = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
+                &*footer, NSLayoutAttribute::Leading, NSLayoutRelation::Equal,
+                Some(&*content_view), NSLayoutAttribute::Leading, 1.0, CONTENT_PADDING,
+            );
+            let footer_trailing = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
+                &*footer, NSLayoutAttribute::Trailing, NSLayoutRelation::Equal,
+                Some(&*content_view), NSLayoutAttribute::Trailing, 1.0, -CONTENT_PADDING,
             );
             leading.setActive(true);
             trailing.setActive(true);
             top.setActive(true);
             cb_center.setActive(true);
             cb_top.setActive(true);
+            footer_top.setActive(true);
+            footer_bottom.setActive(true);
+            footer_leading.setActive(true);
+            footer_trailing.setActive(true);
         }
         window.makeFirstResponder(Some(&content_view));
+        controller.resize_to_fit_entries();
+        controller.update_add_button_state();
 
         controller
     }
@@ -339,17 +384,28 @@ impl PrefsController {
     }
 
     pub fn show(&self) {
-        self.ivars().window.makeKeyAndOrderFront(None);
         let mtm = MainThreadMarker::from(self);
         let app = objc2_app_kit::NSApplication::sharedApplication(mtm);
         app.activate();
+
+        let window = &self.ivars().window;
+        window.deminiaturize(None);
+        window.makeKeyAndOrderFront(None);
+        window.orderFrontRegardless();
     }
 
     fn do_add_entry(&self, mtm: MainThreadMarker) {
+        if self.entry_count() >= MAX_ENTRY_ROWS {
+            return;
+        }
         self.do_add_entry_with(mtm, "", "", false);
     }
 
     fn do_add_entry_with(&self, mtm: MainThreadMarker, label: &str, iana_id: &str, favorite: bool) {
+        if self.entry_count() >= MAX_ENTRY_ROWS {
+            return;
+        }
+
         let ivars = self.ivars();
 
         let row_stack = NSStackView::new(mtm);
@@ -418,12 +474,16 @@ impl PrefsController {
         // Insert before the "Add" button (last arranged subview)
         let count = ivars.rows_stack.arrangedSubviews().count();
         if count > 0 {
-            ivars.rows_stack.insertArrangedSubview_atIndex(&row_stack, (count - 1) as NSInteger);
+            ivars
+                .rows_stack
+                .insertArrangedSubview_atIndex(&row_stack, (count - 1) as NSInteger);
         } else {
             ivars.rows_stack.addArrangedSubview(&row_stack);
         }
 
         self.update_tab_order();
+        self.resize_to_fit_entries();
+        self.update_add_button_state();
     }
 
     fn do_remove_entry(&self, _mtm: MainThreadMarker, sender: &NSButton) {
@@ -453,7 +513,48 @@ impl PrefsController {
         }
 
         self.update_tab_order();
+        self.resize_to_fit_entries();
+        self.update_add_button_state();
         self.do_save();
+    }
+
+    fn entry_count(&self) -> usize {
+        self.ivars()
+            .rows_stack
+            .arrangedSubviews()
+            .count()
+            .saturating_sub(1) as usize
+    }
+
+    fn resize_to_fit_entries(&self) {
+        let window = &self.ivars().window;
+        if let Some(content_view) = window.contentView() {
+            content_view.layoutSubtreeIfNeeded();
+            let fitting = content_view.fittingSize();
+            window.setContentSize(CGSize::new(PREF_WINDOW_WIDTH, fitting.height));
+        }
+    }
+
+    fn update_add_button_state(&self) {
+        let subviews = self.ivars().rows_stack.arrangedSubviews();
+        if subviews.count() == 0 {
+            return;
+        }
+
+        let Ok(add_row) = subviews
+            .objectAtIndex(subviews.count() - 1)
+            .downcast::<NSStackView>()
+        else {
+            return;
+        };
+        let add_row_subviews = add_row.arrangedSubviews();
+        if add_row_subviews.count() < 2 {
+            return;
+        }
+        let Ok(add_button) = add_row_subviews.objectAtIndex(1).downcast::<NSButton>() else {
+            return;
+        };
+        add_button.setEnabled(self.entry_count() < MAX_ENTRY_ROWS);
     }
 
     fn do_set_favorite(&self, sender: &NSButton) {
@@ -488,9 +589,7 @@ impl PrefsController {
         };
 
         let query = combo.stringValue().to_string();
-        self.ivars()
-            .combo_data_source
-            .update_filter(&query);
+        self.ivars().combo_data_source.update_filter(&query);
         combo.noteNumberOfItemsChanged();
         combo.reloadData();
 
@@ -573,8 +672,7 @@ impl PrefsController {
             if row_subviews.count() < ROW_SUBVIEW_COUNT {
                 continue;
             }
-            let star: Retained<NSButton> =
-                row_subviews.objectAtIndex(IDX_STAR).downcast().unwrap();
+            let star: Retained<NSButton> = row_subviews.objectAtIndex(IDX_STAR).downcast().unwrap();
             star.setState(NSControlStateValueOn);
             return;
         }
@@ -620,8 +718,7 @@ impl PrefsController {
                 continue;
             }
 
-            let star: Retained<NSButton> =
-                row_subviews.objectAtIndex(IDX_STAR).downcast().unwrap();
+            let star: Retained<NSButton> = row_subviews.objectAtIndex(IDX_STAR).downcast().unwrap();
             let label_field: Retained<NSTextField> =
                 row_subviews.objectAtIndex(IDX_LABEL).downcast().unwrap();
             let iana_combo: Retained<NSComboBox> =
@@ -643,6 +740,21 @@ impl PrefsController {
         settings::save_entries(&entries);
         (ivars.on_save)();
     }
+}
+
+fn preferred_rows_height(entry_count: usize) -> f64 {
+    let row_count = entry_count.min(MAX_ENTRY_ROWS);
+    ROW_HEIGHT * row_count as f64 + ADD_ROW_HEIGHT + 8.0 * row_count as f64
+}
+
+fn preferred_content_height(entry_count: usize) -> f64 {
+    CONTENT_PADDING
+        + preferred_rows_height(entry_count)
+        + SECTION_GAP
+        + 24.0
+        + SECTION_GAP
+        + FOOTER_HEIGHT
+        + CONTENT_PADDING
 }
 
 fn add_width_constraint(view: &NSView, width: f64) {
@@ -694,6 +806,41 @@ fn create_star_button(
     btn
 }
 
+fn create_footer(mtm: MainThreadMarker, target: &PrefsController) -> Retained<NSStackView> {
+    let footer = NSStackView::new(mtm);
+    footer.setOrientation(NSUserInterfaceLayoutOrientation::Horizontal);
+    footer.setSpacing(8.0);
+    footer.setDistribution(NSStackViewDistribution::Fill);
+
+    let font = NSFont::systemFontOfSize(NSFont::smallSystemFontSize());
+    let secondary = NSColor::secondaryLabelColor();
+
+    let name = NSTextField::labelWithString(ns_string!("Cadran V1.0"), mtm);
+    name.setFont(Some(&font));
+    name.setTextColor(Some(&secondary));
+
+    let link = unsafe {
+        NSButton::buttonWithTitle_target_action(
+            ns_string!("github.com/pior/cadran"),
+            Some(target as &AnyObject),
+            Some(sel!(openGitHub:)),
+            mtm,
+        )
+    };
+    link.setBordered(false);
+    link.setFont(Some(&font));
+    link.setContentTintColor(Some(&NSColor::linkColor()));
+    link.setToolTip(Some(&NSString::from_str(GITHUB_URL)));
+
+    let spacer = NSView::new(mtm);
+    spacer.setTranslatesAutoresizingMaskIntoConstraints(false);
+
+    footer.addArrangedSubview(&name);
+    footer.addArrangedSubview(&link);
+    footer.addArrangedSubview(&spacer);
+    footer
+}
+
 fn create_text_field(
     mtm: MainThreadMarker,
     placeholder: &str,
@@ -718,7 +865,9 @@ fn create_timezone_combo(
     combo.setCompletes(false);
     combo.setUsesDataSource(true);
     let ds_obj = data_source as &AnyObject;
-    unsafe { let _: () = msg_send![&combo, setDataSource: ds_obj]; }
+    unsafe {
+        let _: () = msg_send![&combo, setDataSource: ds_obj];
+    }
     combo.setNumberOfVisibleItems(10);
     combo.setPlaceholderString(Some(ns_string!("Type to search...")));
     combo.setStringValue(&NSString::from_str(value));
@@ -881,7 +1030,11 @@ impl PrefsStackView {
         }
 
         let src_view: Retained<NSView> = subviews.objectAtIndex(src_idx).downcast().unwrap();
-        let final_dest = if dest_idx > src_idx { dest_idx - 1 } else { dest_idx };
+        let final_dest = if dest_idx > src_idx {
+            dest_idx - 1
+        } else {
+            dest_idx
+        };
 
         self.removeArrangedSubview(&src_view);
         self.insertArrangedSubview_atIndex(&src_view, final_dest.try_into().unwrap());

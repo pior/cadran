@@ -49,6 +49,19 @@ define_class!(
 
         #[unsafe(method(showPreferences:))]
         unsafe fn show_preferences(&self, _sender: &AnyObject) {
+            unsafe {
+                NSTimer::scheduledTimerWithTimeInterval_target_selector_userInfo_repeats(
+                    0.0,
+                    self as &AnyObject,
+                    sel!(openPreferencesDeferred:),
+                    None,
+                    false,
+                );
+            }
+        }
+
+        #[unsafe(method(openPreferencesDeferred:))]
+        unsafe fn open_preferences_deferred(&self, _timer: &NSTimer) {
             let mtm = MainThreadMarker::from(self);
             self.open_preferences(mtm);
         }
@@ -124,7 +137,7 @@ impl AppDelegate {
 
         let preferences_item = create_menu_item(
             mtm,
-            ns_string!("Preferences\u{2026}"),
+            ns_string!("Settings\u{2026}"),
             Some(sel!(showPreferences:)),
         );
         unsafe { preferences_item.setTarget(Some(self as &AnyObject)) };
