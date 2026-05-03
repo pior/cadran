@@ -1,4 +1,4 @@
-use objc2_foundation::{ns_string, NSString, NSUserDefaults};
+use objc2_foundation::{NSString, NSUserDefaults};
 use serde::{Deserialize, Serialize};
 
 use crate::timezone::TimezoneEntry;
@@ -8,8 +8,6 @@ const ENTRIES_KEY: &str = "timezone_entries";
 #[derive(Serialize, Deserialize)]
 struct StoredEntry {
     label: String,
-    #[serde(default)]
-    city: Option<String>,
     iana_id: String,
     #[serde(default)]
     favorite: bool,
@@ -35,7 +33,6 @@ pub fn save_entries(entries: &[TimezoneEntry]) {
         .iter()
         .map(|e| StoredEntry {
             label: e.label.clone(),
-            city: None,
             iana_id: e.iana_id().to_string(),
             favorite: e.favorite,
         })
@@ -46,7 +43,7 @@ pub fn save_entries(entries: &[TimezoneEntry]) {
     unsafe {
         defaults.setObject_forKey(
             Some(&NSString::from_str(&json)),
-            ns_string!("timezone_entries"),
+            &NSString::from_str(ENTRIES_KEY),
         );
     }
 }

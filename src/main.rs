@@ -103,15 +103,16 @@ impl AppDelegate {
         let entries = ivars.entries.borrow();
         let now = jiff::Zoned::now();
 
-        let display_entry = entries
-            .iter()
-            .find(|e| e.favorite)
-            .or(entries.first());
-        if let Some(entry) = display_entry {
-            let formatted = entry.format(&now);
-            let title = NSString::from_str(&format!("\u{1F310} {}", formatted.time));
-            if let Some(button) = ivars.status_item.button(mtm) {
-                button.setTitle(&title);
+        if let Some(button) = ivars.status_item.button(mtm) {
+            let display_entry = entries
+                .iter()
+                .find(|e| e.favorite)
+                .or(entries.first());
+            if let Some(entry) = display_entry {
+                let formatted = entry.format(&now);
+                button.setTitle(&NSString::from_str(&format!("\u{1F310} {}", formatted.time)));
+            } else {
+                button.setTitle(ns_string!("\u{1F310}"));
             }
         }
 

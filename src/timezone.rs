@@ -81,23 +81,27 @@ mod tests {
     use jiff::civil::date;
 
     #[test]
-    fn jiff_accepts_common_timezone_names() {
-        let cases = vec![
-            "UTC",
-            "UTC+4",
-            "UTC-8",
-            "GMT+4",
-            "GMT-8",
-            "PT",
-            "PST",
-            "PDT",
-            "America/Los_Angeles",
-            "US/Pacific",
-        ];
-        for case in cases {
-            let res = jiff::tz::TimeZone::get(case);
-            println!("GET '{}': {}", case, res.is_ok());
-        }
+    fn try_new_with_valid_timezone() {
+        let entry = TimezoneEntry::try_new("Test", "America/New_York", false);
+        assert!(entry.is_some());
+        assert_eq!(entry.unwrap().iana_id(), "America/New_York");
+    }
+
+    #[test]
+    fn try_new_with_invalid_timezone() {
+        assert!(TimezoneEntry::try_new("Test", "Not/A/Timezone", false).is_none());
+        assert!(TimezoneEntry::try_new("Test", "", false).is_none());
+    }
+
+    #[test]
+    fn format_produces_hhmm_time() {
+        let entry = TimezoneEntry::new("Paris", "Europe/Paris", false);
+        let now = date(2024, 7, 15).at(12, 0, 0, 0).in_tz("UTC").unwrap();
+        let formatted = entry.format(&now);
+
+        assert_eq!(formatted.label, "Paris");
+        assert_eq!(formatted.time, "14:00");
+        assert_eq!(formatted.relative_day, "Today");
     }
 
     #[test]
@@ -162,10 +166,7 @@ mod tests {
 
 pub fn default_entries() -> Vec<TimezoneEntry> {
     vec![
-        TimezoneEntry::new("Sam", "Europe/London", true),
-        TimezoneEntry::new("Mika", "Asia/Tokyo", false),
-        TimezoneEntry::new("Ana", "America/New_York", false),
-        TimezoneEntry::new("Priya", "Asia/Kolkata", false),
-        TimezoneEntry::new("Leo", "Australia/Sydney", false),
+        TimezoneEntry::new("UTC", "UTC", true),
+        TimezoneEntry::new("Paris", "Europe/Paris", false),
     ]
 }

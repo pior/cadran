@@ -135,4 +135,23 @@ mod tests {
             19_800
         );
     }
+
+    #[test]
+    fn rejects_empty_and_whitespace() {
+        assert!(resolve_timezone("").is_none());
+        assert!(resolve_timezone("   ").is_none());
+    }
+
+    #[test]
+    fn normalizes_bare_utc_and_gmt() {
+        assert_eq!(normalize_offset_id("UTC").unwrap(), "UTC");
+        assert_eq!(normalize_offset_id("gmt").unwrap(), "UTC");
+        assert_eq!(normalize_offset_id("  utc  ").unwrap(), "UTC");
+    }
+
+    #[test]
+    fn rejects_nonsense_input() {
+        assert!(resolve_timezone("Not/A/Timezone").is_none());
+        assert!(normalize_offset_id("hello").is_none());
+    }
 }

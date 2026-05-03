@@ -351,11 +351,28 @@ mod tests {
     }
 
     #[test]
-    fn list_all_available_timezones() {
-        let mut available: Vec<_> = jiff::tz::db().available().collect();
-        available.sort();
-        for name in available {
-            println!("ALL_TZ: {}", name.as_str());
-        }
+    fn extract_city_from_iana_id() {
+        assert_eq!(extract_city("America/New_York"), "New York");
+        assert_eq!(extract_city("Asia/Tokyo"), "Tokyo");
+        assert_eq!(extract_city("America/Argentina/Rio_Gallegos"), "Rio Gallegos");
+        assert_eq!(extract_city("UTC"), "UTC");
+    }
+
+    #[test]
+    fn is_subsequence_matches() {
+        assert!(is_subsequence("abc", "aXbXc"));
+        assert!(is_subsequence("", "anything"));
+        assert!(is_subsequence("abc", "abc"));
+        assert!(!is_subsequence("abc", "ab"));
+        assert!(!is_subsequence("abc", "acb"));
+    }
+
+    #[test]
+    fn abbreviation_family_maps_dst_variants() {
+        assert_eq!(abbreviation_family("est"), Some("et"));
+        assert_eq!(abbreviation_family("edt"), Some("et"));
+        assert_eq!(abbreviation_family("pst"), Some("pt"));
+        assert_eq!(abbreviation_family("cest"), Some("cet"));
+        assert_eq!(abbreviation_family("xyz"), None);
     }
 }

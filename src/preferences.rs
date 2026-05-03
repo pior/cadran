@@ -36,9 +36,6 @@ const _IDX_DELETE: usize = 4;
 const ROW_SUBVIEW_COUNT: usize = 5;
 const MAX_ENTRY_ROWS: usize = 15;
 const PREF_WINDOW_WIDTH: f64 = 560.0;
-const ROW_HEIGHT: f64 = 56.0;
-const ADD_ROW_HEIGHT: f64 = 24.0;
-const FOOTER_HEIGHT: f64 = 20.0;
 const CONTENT_PADDING: f64 = 16.0;
 const SECTION_GAP: f64 = 10.0;
 const GITHUB_URL: &str = "https://github.com/pior/cadran";
@@ -245,7 +242,7 @@ impl PrefsController {
     ) -> Retained<Self> {
         let frame = CGRect::new(
             CGPoint::new(0.0, 0.0),
-            CGSize::new(PREF_WINDOW_WIDTH, preferred_content_height(entries.len())),
+            CGSize::new(PREF_WINDOW_WIDTH, 400.0),
         );
         let style =
             NSWindowStyleMask::Titled | NSWindowStyleMask::Closable;
@@ -398,7 +395,8 @@ impl PrefsController {
         if self.entry_count() >= MAX_ENTRY_ROWS {
             return;
         }
-        self.do_add_entry_with(mtm, "", "", false);
+        let favorite = self.entry_count() == 0;
+        self.do_add_entry_with(mtm, "", "", favorite);
     }
 
     fn do_add_entry_with(&self, mtm: MainThreadMarker, label: &str, iana_id: &str, favorite: bool) {
@@ -742,20 +740,6 @@ impl PrefsController {
     }
 }
 
-fn preferred_rows_height(entry_count: usize) -> f64 {
-    let row_count = entry_count.min(MAX_ENTRY_ROWS);
-    ROW_HEIGHT * row_count as f64 + ADD_ROW_HEIGHT + 8.0 * row_count as f64
-}
-
-fn preferred_content_height(entry_count: usize) -> f64 {
-    CONTENT_PADDING
-        + preferred_rows_height(entry_count)
-        + SECTION_GAP
-        + 24.0
-        + SECTION_GAP
-        + FOOTER_HEIGHT
-        + CONTENT_PADDING
-}
 
 fn add_width_constraint(view: &NSView, width: f64) {
     unsafe {
