@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 
 use objc2::rc::Retained;
-use objc2::runtime::{AnyObject, Bool, ProtocolObject};
+use objc2::runtime::{AnyObject, Bool, ProtocolObject, Sel};
 use objc2::sel;
 use objc2::{
     define_class, msg_send, AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly,
@@ -10,7 +10,7 @@ use objc2::{
 use objc2_app_kit::{
     NSBackingStoreType, NSButton, NSButtonType, NSColor, NSComboBox, NSDragOperation,
     NSDraggingContext, NSDraggingDestination, NSDraggingInfo, NSDraggingItem, NSDraggingSession,
-    NSDraggingSource, NSImage, NSLayoutAttribute, NSLayoutRelation, NSPasteboardItem,
+    NSControl, NSDraggingSource, NSImage, NSLayoutAttribute, NSLayoutRelation, NSPasteboardItem,
     NSStackView, NSStackViewDistribution, NSTextField, NSTextFieldBezelStyle,
     NSUserInterfaceLayoutOrientation, NSView, NSWindow, NSWindowStyleMask,
 };
@@ -47,7 +47,7 @@ define_class!(
     impl ComboDataSource {
         #[unsafe(method(numberOfItemsInComboBox:))]
         fn number_of_items(&self, _combo_box: &NSComboBox) -> NSInteger {
-            self.ivars().items.len() as NSInteger
+            self.ivars().items.borrow().len() as NSInteger
         }
 
         #[unsafe(method(comboBox:objectValueForItemAtIndex:))]
@@ -56,7 +56,7 @@ define_class!(
             _combo_box: &NSComboBox,
             index: NSInteger,
         ) -> *mut AnyObject {
-            let items = &self.ivars().items;
+            let items = self.ivars().items.borrow();
             let idx = index as usize;
             if idx < items.len() {
                 Retained::autorelease_return(NSString::from_str(&items[idx])) as *mut NSString
@@ -70,30 +70,56 @@ define_class!(
         fn completed_string(
             &self,
             _combo_box: &NSComboBox,
-            string: &NSString,
+            _string: &NSString,
         ) -> *mut NSString {
-            let query = string.to_string().to_lowercase();
-            match self
-                .ivars()
-                .items
-                .iter()
-                .find(|item| item.to_lowercase().starts_with(&query))
-            {
-                Some(item) => Retained::autorelease_return(NSString::from_str(item)),
-                None => std::ptr::null_mut()
-            }
+            std::ptr::null_mut()
         }
     }
 );
 
 struct ComboDataSourceIvars {
-    items: Vec<String>,
+    search: TimezoneSearch,
+    items: RefCell<Vec<String>>,
 }
 
 impl ComboDataSource {
-    fn new(mtm: MainThreadMarker, items: Vec<String>) -> Retained<Self> {
-        let this = Self::alloc(mtm).set_ivars(ComboDataSourceIvars { items });
+    fn new(mtm: MainThreadMarker, search: TimezoneSearch) -> Retained<Self> {
+        let items = RefCell::new(search.combo_items());
+        let this = Self::alloc(mtm).set_ivars(ComboDataSourceIvars { search, items });
         unsafe { msg_send![super(this), init] }
+    }
+
+    fn update_filter(&self, query: &str) {
+        self.ivars()
+            .items
+            .replace(self.ivars().search.completions_for(query));
+    }
+
+    fn should_show_popup(&self, query: &str) -> bool {
+        let query = query.trim();
+        if query.is_empty() {
+            return false;
+        }
+
+        let items = self.ivars().items.borrow();
+        if items.is_empty() {
+            return false;
+        }
+
+        items.len() > 1 || items.first().is_some_and(|item| item != query)
+    }
+
+    fn single_completion(&self, query: &str) -> Option<String> {
+        let query = query.trim();
+        if query.is_empty() {
+            return None;
+        }
+
+        let completions = self.ivars().search.completions_for(query);
+        match completions.as_slice() {
+            [completion] if completion != query => Some(completion.clone()),
+            _ => None,
+        }
     }
 }
 
@@ -107,13 +133,46 @@ define_class!(
 
     impl PrefsController {
         #[unsafe(method(controlTextDidChange:))]
-        fn control_text_did_change(&self, _notification: &NSNotification) {
+        fn control_text_did_change(&self, notification: &NSNotification) {
+            self.update_combo_suggestions(notification);
             self.do_save();
         }
 
+        #[unsafe(method(controlTextDidBeginEditing:))]
+        fn control_text_did_begin_editing(&self, notification: &NSNotification) {
+            self.update_combo_suggestions(notification);
+        }
+
         #[unsafe(method(controlTextDidEndEditing:))]
-        fn control_text_did_end_editing(&self, _notification: &NSNotification) {
+        fn control_text_did_end_editing(&self, notification: &NSNotification) {
+            self.commit_single_combo_suggestion(notification);
             self.do_canonicalize();
+        }
+
+        #[unsafe(method(control:textView:doCommandBySelector:))]
+        fn control_text_view_do_command_by_selector(
+            &self,
+            control: &NSControl,
+            _text_view: &AnyObject,
+            command_selector: Sel,
+        ) -> Bool {
+            if command_selector != sel!(insertNewline:)
+                && command_selector != sel!(insertNewlineIgnoringFieldEditor:)
+            {
+                return Bool::NO;
+            }
+
+            let Some(combo) = control.downcast_ref::<NSComboBox>() else {
+                return Bool::NO;
+            };
+
+            if self.commit_single_combo(combo) {
+                self.dismiss_combo_popup(combo);
+                self.do_canonicalize();
+                return Bool::YES;
+            }
+
+            Bool::NO
         }
 
         #[unsafe(method(comboBoxSelectionDidChange:))]
@@ -193,9 +252,7 @@ impl PrefsController {
         rows_stack.setTranslatesAutoresizingMaskIntoConstraints(false);
 
         let search = TimezoneSearch::new();
-        let combo_items: Vec<String> =
-            search.combo_items().into_iter().map(String::from).collect();
-        let combo_data_source = ComboDataSource::new(mtm, combo_items);
+        let combo_data_source = ComboDataSource::new(mtm, search);
 
         let this = Self::alloc(mtm).set_ivars(PrefsControllerIvars {
             window: window.retain(),
@@ -218,7 +275,11 @@ impl PrefsController {
         let launch_checkbox = create_launch_at_login_checkbox(mtm, &controller);
         launch_checkbox.setTranslatesAutoresizingMaskIntoConstraints(false);
 
-        let content_view = window.contentView().unwrap();
+        let content_view = PrefsContentView::new(mtm);
+        content_view.setTranslatesAutoresizingMaskIntoConstraints(false);
+        window.setContentView(Some(&content_view));
+        window.setInitialFirstResponder(Some(&content_view));
+
         content_view.addSubview(&rows_stack);
         content_view.addSubview(&launch_checkbox);
 
@@ -236,9 +297,9 @@ impl PrefsController {
                 &*rows_stack, NSLayoutAttribute::Top, NSLayoutRelation::Equal,
                 Some(&*content_view), NSLayoutAttribute::Top, 1.0, padding,
             );
-            let cb_leading = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
-                &*launch_checkbox, NSLayoutAttribute::Leading, NSLayoutRelation::Equal,
-                Some(&*content_view), NSLayoutAttribute::Leading, 1.0, padding,
+            let cb_center = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
+                &*launch_checkbox, NSLayoutAttribute::CenterX, NSLayoutRelation::Equal,
+                Some(&*content_view), NSLayoutAttribute::CenterX, 1.0, 0.0,
             );
             let cb_top = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
                 &*launch_checkbox, NSLayoutAttribute::Top, NSLayoutRelation::Equal,
@@ -247,9 +308,10 @@ impl PrefsController {
             leading.setActive(true);
             trailing.setActive(true);
             top.setActive(true);
-            cb_leading.setActive(true);
+            cb_center.setActive(true);
             cb_top.setActive(true);
         }
+        window.makeFirstResponder(Some(&content_view));
 
         controller
     }
@@ -415,6 +477,63 @@ impl PrefsController {
             });
         }
         self.do_save();
+    }
+
+    fn update_combo_suggestions(&self, notification: &NSNotification) {
+        let Some(object) = notification.object() else {
+            return;
+        };
+        let Ok(combo) = object.downcast::<NSComboBox>() else {
+            return;
+        };
+
+        let query = combo.stringValue().to_string();
+        self.ivars()
+            .combo_data_source
+            .update_filter(&query);
+        combo.noteNumberOfItemsChanged();
+        combo.reloadData();
+
+        if self.ivars().combo_data_source.should_show_popup(&query) {
+            if let Some(cell) = combo.cell() {
+                if cell.respondsToSelector(sel!(popUp:)) {
+                    unsafe {
+                        let _: () = msg_send![&*cell, popUp: &*combo];
+                    }
+                }
+            }
+        }
+    }
+
+    fn commit_single_combo_suggestion(&self, notification: &NSNotification) -> bool {
+        let Some(object) = notification.object() else {
+            return false;
+        };
+        let Ok(combo) = object.downcast::<NSComboBox>() else {
+            return false;
+        };
+
+        self.commit_single_combo(&combo)
+    }
+
+    fn commit_single_combo(&self, combo: &NSComboBox) -> bool {
+        let query = combo.stringValue().to_string();
+        let Some(completion) = self.ivars().combo_data_source.single_completion(&query) else {
+            return false;
+        };
+
+        combo.setStringValue(&NSString::from_str(&completion));
+        true
+    }
+
+    fn dismiss_combo_popup(&self, combo: &NSComboBox) {
+        if let Some(cell) = combo.cell() {
+            if cell.respondsToSelector(sel!(dismissPopUp:)) {
+                unsafe {
+                    let _: () = msg_send![&*cell, dismissPopUp: &*combo];
+                }
+            }
+        }
     }
 
     fn do_canonicalize(&self) {
@@ -596,7 +715,7 @@ fn create_timezone_combo(
 ) -> Retained<NSComboBox> {
     let combo = NSComboBox::new(mtm);
     combo.setEditable(true);
-    combo.setCompletes(true);
+    combo.setCompletes(false);
     combo.setUsesDataSource(true);
     let ds_obj = data_source as &AnyObject;
     unsafe { let _: () = msg_send![&combo, setDataSource: ds_obj]; }
@@ -659,6 +778,38 @@ fn create_add_button_row(mtm: MainThreadMarker, target: &PrefsController) -> Ret
     row.addArrangedSubview(&btn);
 
     row
+}
+
+define_class!(
+    #[unsafe(super(NSView))]
+    #[thread_kind = MainThreadOnly]
+    struct PrefsContentView;
+
+    unsafe impl NSObjectProtocol for PrefsContentView {}
+
+    impl PrefsContentView {
+        #[unsafe(method(acceptsFirstResponder))]
+        fn accepts_first_responder(&self) -> bool {
+            true
+        }
+
+        #[unsafe(method(mouseDown:))]
+        fn mouse_down(&self, event: &objc2_app_kit::NSEvent) {
+            if let Some(window) = self.window() {
+                window.makeFirstResponder(Some(self));
+            }
+            unsafe {
+                let _: () = msg_send![super(self), mouseDown: event];
+            }
+        }
+    }
+);
+
+impl PrefsContentView {
+    fn new(mtm: MainThreadMarker) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(());
+        unsafe { msg_send![super(this), init] }
+    }
 }
 
 define_class!(

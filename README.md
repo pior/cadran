@@ -8,11 +8,15 @@ A lightweight multi-timezone macOS menu bar app.
 ## Features
 
 - Lives in the menu bar with no dock icon
-- Shows the current time for your primary timezone at a glance
-- Dropdown displays multiple timezones with labels, city names, and relative day (Today/Tomorrow/Yesterday)
-- Updates every minute, idle between updates
-- Persists your timezone list across restarts
-- Native macOS app — no Electron, no webview, no heavy runtime
+- Shows the current time for your favorite timezone at a glance
+- Dropdown displays saved timezones with custom labels, current time, and relative day context
+- Marks relative days as Today, Tomorrow, or Yesterday when the saved timezone is on an adjacent local date
+- Preferences window for adding, removing, editing, favoriting, and reordering timezone entries
+- Timezone picker accepts city-style search results, IANA IDs, UTC offsets, and timezone abbreviations
+- Launch at Login toggle in preferences
+- Very light CPU usage
+- Persists your timezone list across restarts using macOS user defaults
+- Native macOS app with no Electron, webview, or heavy runtime
 
 ## Install
 

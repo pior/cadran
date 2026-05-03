@@ -1,6 +1,7 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 mod preferences;
+mod resolver;
 mod search;
 mod settings;
 mod timezone;
@@ -104,15 +105,16 @@ impl AppDelegate {
         let menu = NSMenu::new(mtm);
         menu.setAutoenablesItems(false);
 
-        let menu_width = 250.0;
+        let menu_width = 320.0;
         for entry in entries.iter() {
             let formatted = entry.format(&now);
-            let time_text = if formatted.relative_day.is_empty() {
-                formatted.time.clone()
-            } else {
-                format!("{}  {}", formatted.time, formatted.relative_day)
-            };
-            let view = create_entry_view(mtm, &formatted.label, &time_text, menu_width);
+            let view = create_entry_view(
+                mtm,
+                &formatted.label,
+                &formatted.time,
+                formatted.relative_day,
+                menu_width,
+            );
             let item = NSMenuItem::new(mtm);
             item.setView(Some(&view));
             menu.addItem(&item);
@@ -188,6 +190,7 @@ fn create_entry_view(
     mtm: MainThreadMarker,
     label: &str,
     time: &str,
+    relative_day: &str,
     width: f64,
 ) -> Retained<NSView> {
     let height = 22.0;
@@ -201,9 +204,15 @@ fn create_entry_view(
 
     let label_field = create_menu_label(mtm, label);
     label_field.setFont(Some(&font));
+    let label_width = width * 0.52 - padding;
+    let time_x = width * 0.52;
+    let time_width = 52.0;
+    let day_x = time_x + time_width + 8.0;
+    let day_width = width - day_x - padding;
+
     label_field.setFrame(CGRect::new(
         CGPoint::new(padding, 0.0),
-        CGSize::new(width * 0.6 - padding, height),
+        CGSize::new(label_width, height),
     ));
 
     let time_field = create_menu_label(mtm, time);
@@ -211,12 +220,21 @@ fn create_entry_view(
     time_field.setAlignment(NSTextAlignment::Right);
     time_field.setTextColor(Some(&NSColor::secondaryLabelColor()));
     time_field.setFrame(CGRect::new(
-        CGPoint::new(width * 0.6, 0.0),
-        CGSize::new(width * 0.4 - padding, height),
+        CGPoint::new(time_x, 0.0),
+        CGSize::new(time_width, height),
+    ));
+
+    let day_field = create_menu_label(mtm, relative_day);
+    day_field.setFont(Some(&font));
+    day_field.setTextColor(Some(&NSColor::secondaryLabelColor()));
+    day_field.setFrame(CGRect::new(
+        CGPoint::new(day_x, 0.0),
+        CGSize::new(day_width, height),
     ));
 
     view.addSubview(&label_field);
     view.addSubview(&time_field);
+    view.addSubview(&day_field);
     view
 }
 
