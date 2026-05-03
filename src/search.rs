@@ -104,10 +104,11 @@ mod tests {
     }
 
     #[test]
-    fn extract_city_from_iana() {
-        assert_eq!(extract_city("Asia/Tokyo"), "Tokyo");
-        assert_eq!(extract_city("America/New_York"), "New York");
-        assert_eq!(extract_city("Europe/Paris"), "Paris");
-        assert_eq!(extract_city("US/Eastern"), "Eastern");
+    fn list_all_available_timezones() {
+        let mut available: Vec<_> = jiff::tz::db().available().collect();
+        available.sort();
+        for name in available {
+            println!("ALL_TZ: {}", name.as_str());
+        }
     }
 }

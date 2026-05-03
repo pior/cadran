@@ -2,7 +2,8 @@
 
 A lightweight multi-timezone macOS menu bar app.
 
-<!-- ![menu bar screenshot placeholder](docs/screenshot.png) -->
+![menu bar screenshot](docs/capture-menubar.png)
+![preferences screenshot](docs/capture-preferences.png)
 
 ## Features
 
@@ -25,7 +26,7 @@ cargo run
 
 ## Status
 
-Early development. Preferences UI and timezone search are not yet implemented.
+Early development.
 
 ## License
 

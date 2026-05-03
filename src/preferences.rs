@@ -8,11 +8,13 @@ use objc2::{
     Message,
 };
 use objc2_app_kit::{
-    NSBackingStoreType, NSButton, NSComboBox, NSDragOperation, NSDraggingContext,
-    NSDraggingDestination, NSDraggingInfo, NSDraggingItem, NSDraggingSession, NSDraggingSource,
-    NSImage, NSPasteboard, NSStackView, NSStackViewDistribution, NSTextField,
-    NSTextFieldBezelStyle, NSUserInterfaceLayoutOrientation, NSView, NSWindow, NSWindowStyleMask,
+    NSBackingStoreType, NSButton, NSButtonType, NSColor, NSComboBox, NSDragOperation,
+    NSDraggingContext, NSDraggingDestination, NSDraggingInfo, NSDraggingItem, NSDraggingSession,
+    NSDraggingSource, NSImage, NSLayoutAttribute, NSLayoutRelation, NSPasteboardItem,
+    NSStackView, NSStackViewDistribution, NSTextField, NSTextFieldBezelStyle,
+    NSUserInterfaceLayoutOrientation, NSView, NSWindow, NSWindowStyleMask,
 };
+use objc2_app_kit::{NSControlStateValueOff, NSControlStateValueOn};
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{ns_string, NSInteger, NSNotification, NSObject, NSObjectProtocol, NSString};
 
@@ -23,6 +25,14 @@ use crate::timezone::TimezoneEntry;
 fn row_drag_type() -> Retained<NSString> {
     ns_string!("com.pior.clock.row").retain()
 }
+
+// Row subview indices
+const IDX_STAR: usize = 0;
+const _IDX_HANDLE: usize = 1;
+const IDX_LABEL: usize = 2;
+const IDX_TIMEZONE: usize = 3;
+const _IDX_DELETE: usize = 4;
+const ROW_SUBVIEW_COUNT: usize = 5;
 
 // -- ComboBoxDataSource: case-insensitive prefix completion --
 
@@ -123,6 +133,16 @@ define_class!(
             self.do_remove_entry(mtm, sender);
         }
 
+        #[unsafe(method(setFavorite:))]
+        unsafe fn set_favorite(&self, sender: &NSButton) {
+            self.do_set_favorite(sender);
+        }
+
+        #[unsafe(method(toggleLaunchAtLogin:))]
+        unsafe fn toggle_launch_at_login(&self, sender: &NSButton) {
+            self.do_toggle_launch_at_login(sender);
+        }
+
         #[unsafe(method(showWindow))]
         unsafe fn show_window_objc(&self) {
             self.show();
@@ -169,6 +189,8 @@ impl PrefsController {
         let rows_stack = PrefsStackView::new(mtm);
         rows_stack.setOrientation(NSUserInterfaceLayoutOrientation::Vertical);
         rows_stack.setSpacing(8.0);
+        rows_stack.setAlignment(NSLayoutAttribute::Width);
+        rows_stack.setTranslatesAutoresizingMaskIntoConstraints(false);
 
         let search = TimezoneSearch::new();
         let combo_items: Vec<String> =
@@ -184,30 +206,74 @@ impl PrefsController {
         let controller: Retained<Self> = unsafe { msg_send![super(this), init] };
         rows_stack.ivars().controller.replace(Some(controller.retain()));
 
+        let add_row = create_add_button_row(mtm, &controller);
+        rows_stack.addArrangedSubview(&add_row);
+
         for entry in entries {
-            controller.do_add_entry_with(mtm, &entry.label, entry.iana_id());
+            controller.do_add_entry_with(mtm, &entry.label, entry.iana_id(), entry.favorite);
         }
 
-        let button_row = create_button_row(mtm, &controller);
+        controller.update_tab_order();
 
-        let outer_stack = NSStackView::new(mtm);
-        outer_stack.setOrientation(NSUserInterfaceLayoutOrientation::Vertical);
-        outer_stack.setSpacing(12.0);
-        let insets = objc2_foundation::NSEdgeInsets {
-            top: 16.0,
-            left: 16.0,
-            bottom: 16.0,
-            right: 16.0,
-        };
-        outer_stack.setEdgeInsets(insets);
-        outer_stack.setFrame(frame);
+        let launch_checkbox = create_launch_at_login_checkbox(mtm, &controller);
+        launch_checkbox.setTranslatesAutoresizingMaskIntoConstraints(false);
 
-        outer_stack.addArrangedSubview(&controller.ivars().rows_stack);
-        outer_stack.addArrangedSubview(&button_row);
+        let content_view = window.contentView().unwrap();
+        content_view.addSubview(&rows_stack);
+        content_view.addSubview(&launch_checkbox);
 
-        window.setContentView(Some(&outer_stack));
+        let padding = 16.0;
+        unsafe {
+            let leading = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
+                &*rows_stack, NSLayoutAttribute::Leading, NSLayoutRelation::Equal,
+                Some(&*content_view), NSLayoutAttribute::Leading, 1.0, padding,
+            );
+            let trailing = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
+                &*rows_stack, NSLayoutAttribute::Trailing, NSLayoutRelation::Equal,
+                Some(&*content_view), NSLayoutAttribute::Trailing, 1.0, -padding,
+            );
+            let top = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
+                &*rows_stack, NSLayoutAttribute::Top, NSLayoutRelation::Equal,
+                Some(&*content_view), NSLayoutAttribute::Top, 1.0, padding,
+            );
+            let cb_leading = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
+                &*launch_checkbox, NSLayoutAttribute::Leading, NSLayoutRelation::Equal,
+                Some(&*content_view), NSLayoutAttribute::Leading, 1.0, padding,
+            );
+            let cb_top = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
+                &*launch_checkbox, NSLayoutAttribute::Top, NSLayoutRelation::Equal,
+                Some(&*rows_stack), NSLayoutAttribute::Bottom, 1.0, 16.0,
+            );
+            leading.setActive(true);
+            trailing.setActive(true);
+            top.setActive(true);
+            cb_leading.setActive(true);
+            cb_top.setActive(true);
+        }
 
         controller
+    }
+
+    fn do_toggle_launch_at_login(&self, sender: &NSButton) {
+        use objc2_service_management::{SMAppService, SMAppServiceStatus};
+
+        let service = unsafe { SMAppService::mainAppService() };
+        let enabled = sender.state() == NSControlStateValueOn;
+
+        if enabled {
+            if let Err(err) = unsafe { service.registerAndReturnError() } {
+                eprintln!("Failed to enable launch at login: {err}");
+                sender.setState(NSControlStateValueOff);
+            }
+        } else {
+            if let Err(err) = unsafe { service.unregisterAndReturnError() } {
+                eprintln!("Failed to disable launch at login: {err}");
+                let status = unsafe { service.status() };
+                if status == SMAppServiceStatus::Enabled {
+                    sender.setState(NSControlStateValueOn);
+                }
+            }
+        }
     }
 
     pub fn show(&self) {
@@ -218,10 +284,10 @@ impl PrefsController {
     }
 
     fn do_add_entry(&self, mtm: MainThreadMarker) {
-        self.do_add_entry_with(mtm, "", "");
+        self.do_add_entry_with(mtm, "", "", false);
     }
 
-    fn do_add_entry_with(&self, mtm: MainThreadMarker, label: &str, iana_id: &str) {
+    fn do_add_entry_with(&self, mtm: MainThreadMarker, label: &str, iana_id: &str, favorite: bool) {
         let ivars = self.ivars();
 
         let row_stack = NSStackView::new(mtm);
@@ -229,22 +295,17 @@ impl PrefsController {
         row_stack.setSpacing(8.0);
         row_stack.setDistribution(NSStackViewDistribution::Fill);
 
+        let delegate: &AnyObject = self;
+
+        // 0. Star (favorite) button
+        let star_btn = create_star_button(mtm, delegate, favorite);
+        star_btn.setTranslatesAutoresizingMaskIntoConstraints(false);
+        add_width_constraint(&star_btn, 24.0);
+
         // 1. Drag Handle
         let handle = DragHandle::new(mtm);
         handle.setTranslatesAutoresizingMaskIntoConstraints(false);
-        // Fixed width for handle
-        unsafe {
-            let constraint = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
-                &handle,
-                objc2_app_kit::NSLayoutAttribute::Width,
-                objc2_app_kit::NSLayoutRelation::Equal,
-                None,
-                objc2_app_kit::NSLayoutAttribute::NotAnAttribute,
-                1.0,
-                20.0
-            );
-            handle.addConstraint(&*constraint);
-        }
+        add_width_constraint(&handle, 20.0);
 
         // 2. Fields
         let label_field = create_text_field(mtm, "Label", label);
@@ -253,7 +314,6 @@ impl PrefsController {
         label_field.setTranslatesAutoresizingMaskIntoConstraints(false);
         iana_combo.setTranslatesAutoresizingMaskIntoConstraints(false);
 
-        let delegate: &AnyObject = self;
         unsafe {
             let _: () = msg_send![&label_field, setDelegate: delegate];
             let _: () = msg_send![&iana_combo, setDelegate: delegate];
@@ -268,59 +328,93 @@ impl PrefsController {
                 mtm,
             )
         };
-        delete_btn.setBezelStyle(objc2_app_kit::NSBezelStyle::RegularSquare);
+        delete_btn.setBezelStyle(objc2_app_kit::NSBezelStyle::SmallSquare);
         delete_btn.setBordered(false);
         delete_btn.setTranslatesAutoresizingMaskIntoConstraints(false);
+        add_width_constraint(&delete_btn, 24.0);
 
-        // Fixed width for delete button
-        unsafe {
-            let constraint = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
-                &delete_btn,
-                objc2_app_kit::NSLayoutAttribute::Width,
-                objc2_app_kit::NSLayoutRelation::Equal,
-                None,
-                objc2_app_kit::NSLayoutAttribute::NotAnAttribute,
-                1.0,
-                24.0
-            );
-            delete_btn.addConstraint(&*constraint);
-        }
-
+        row_stack.addArrangedSubview(&star_btn);
         row_stack.addArrangedSubview(&handle);
         row_stack.addArrangedSubview(&label_field);
         row_stack.addArrangedSubview(&iana_combo);
         row_stack.addArrangedSubview(&delete_btn);
 
-        // Fix layout: make both fields equal width
+        // Make both fields equal width
         unsafe {
             let constraint = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
                 &iana_combo,
-                objc2_app_kit::NSLayoutAttribute::Width,
-                objc2_app_kit::NSLayoutRelation::Equal,
+                NSLayoutAttribute::Width,
+                NSLayoutRelation::Equal,
                 Some(&label_field),
-                objc2_app_kit::NSLayoutAttribute::Width,
+                NSLayoutAttribute::Width,
                 1.0,
                 0.0
             );
             row_stack.addConstraint(&*constraint);
         }
 
-        ivars.rows_stack.addArrangedSubview(&row_stack);
+        // Insert before the "Add" button (last arranged subview)
+        let count = ivars.rows_stack.arrangedSubviews().count();
+        if count > 0 {
+            ivars.rows_stack.insertArrangedSubview_atIndex(&row_stack, (count - 1) as NSInteger);
+        } else {
+            ivars.rows_stack.addArrangedSubview(&row_stack);
+        }
+
+        self.update_tab_order();
     }
 
     fn do_remove_entry(&self, _mtm: MainThreadMarker, sender: &NSButton) {
         let ivars = self.ivars();
         let subviews = ivars.rows_stack.arrangedSubviews();
 
+        let mut was_favorite = false;
         for i in 0..subviews.count() {
             let row_view: Retained<NSView> = subviews.objectAtIndex(i).downcast().unwrap();
             if unsafe { row_view.isDescendantOf(&sender.superview().unwrap()) } {
+                if let Ok(row_stack) = row_view.clone().downcast::<NSStackView>() {
+                    let row_subviews = row_stack.arrangedSubviews();
+                    if row_subviews.count() >= ROW_SUBVIEW_COUNT {
+                        let star: Retained<NSButton> =
+                            row_subviews.objectAtIndex(IDX_STAR).downcast().unwrap();
+                        was_favorite = star.state() == NSControlStateValueOn;
+                    }
+                }
                 ivars.rows_stack.removeArrangedSubview(&row_view);
                 row_view.removeFromSuperview();
-                self.do_save();
-                return;
+                break;
             }
         }
+
+        if was_favorite {
+            self.set_first_row_favorite();
+        }
+
+        self.update_tab_order();
+        self.do_save();
+    }
+
+    fn do_set_favorite(&self, sender: &NSButton) {
+        let ivars = self.ivars();
+        let subviews = ivars.rows_stack.arrangedSubviews();
+
+        for i in 0..subviews.count() {
+            let Ok(row_view) = subviews.objectAtIndex(i).downcast::<NSStackView>() else {
+                continue;
+            };
+            let row_subviews = row_view.arrangedSubviews();
+            if row_subviews.count() < ROW_SUBVIEW_COUNT {
+                continue;
+            }
+            let star: Retained<NSButton> = row_subviews.objectAtIndex(IDX_STAR).downcast().unwrap();
+            let is_target = sender.isDescendantOf(&row_view);
+            star.setState(if is_target {
+                NSControlStateValueOn
+            } else {
+                NSControlStateValueOff
+            });
+        }
+        self.do_save();
     }
 
     fn do_canonicalize(&self) {
@@ -328,20 +422,69 @@ impl PrefsController {
         let subviews = ivars.rows_stack.arrangedSubviews();
 
         for i in 0..subviews.count() {
-            let row_view: Retained<NSStackView> = subviews.objectAtIndex(i).downcast().unwrap();
+            let Ok(row_view) = subviews.objectAtIndex(i).downcast::<NSStackView>() else {
+                continue;
+            };
             let row_subviews = row_view.arrangedSubviews();
-            let iana_combo: Retained<NSComboBox> = row_subviews.objectAtIndex(2).downcast().unwrap();
+            if row_subviews.count() < ROW_SUBVIEW_COUNT {
+                continue;
+            }
+            let iana_combo: Retained<NSComboBox> =
+                row_subviews.objectAtIndex(IDX_TIMEZONE).downcast().unwrap();
 
             let raw_value = iana_combo.stringValue().to_string();
             let iana_id = search::iana_id_from_display(&raw_value);
 
             if !iana_id.is_empty() && iana_id != raw_value {
-                if let Some(entry) = TimezoneEntry::try_new("", iana_id) {
+                if let Some(entry) = TimezoneEntry::try_new("", iana_id, false) {
                     iana_combo.setStringValue(&NSString::from_str(entry.iana_id()));
                 }
             }
         }
         self.do_save();
+    }
+
+    fn set_first_row_favorite(&self) {
+        let subviews = self.ivars().rows_stack.arrangedSubviews();
+        for i in 0..subviews.count() {
+            let Ok(row_view) = subviews.objectAtIndex(i).downcast::<NSStackView>() else {
+                continue;
+            };
+            let row_subviews = row_view.arrangedSubviews();
+            if row_subviews.count() < ROW_SUBVIEW_COUNT {
+                continue;
+            }
+            let star: Retained<NSButton> =
+                row_subviews.objectAtIndex(IDX_STAR).downcast().unwrap();
+            star.setState(NSControlStateValueOn);
+            return;
+        }
+    }
+
+    fn update_tab_order(&self) {
+        let subviews = self.ivars().rows_stack.arrangedSubviews();
+        let mut prev_combo: Option<Retained<NSView>> = None;
+
+        for i in 0..subviews.count() {
+            let Ok(row_view) = subviews.objectAtIndex(i).downcast::<NSStackView>() else {
+                continue;
+            };
+            let row_subviews = row_view.arrangedSubviews();
+            if row_subviews.count() < ROW_SUBVIEW_COUNT {
+                continue;
+            }
+            let label_field: Retained<NSView> =
+                row_subviews.objectAtIndex(IDX_LABEL).downcast().unwrap();
+            let iana_combo: Retained<NSView> =
+                row_subviews.objectAtIndex(IDX_TIMEZONE).downcast().unwrap();
+
+            unsafe { label_field.setNextKeyView(Some(&iana_combo)) };
+
+            if let Some(prev) = prev_combo {
+                unsafe { prev.setNextKeyView(Some(&label_field)) };
+            }
+            prev_combo = Some(iana_combo);
+        }
     }
 
     fn do_save(&self) {
@@ -350,20 +493,30 @@ impl PrefsController {
 
         let subviews = ivars.rows_stack.arrangedSubviews();
         for i in 0..subviews.count() {
-            let row_view: Retained<NSStackView> = subviews.objectAtIndex(i).downcast().unwrap();
+            let Ok(row_view) = subviews.objectAtIndex(i).downcast::<NSStackView>() else {
+                continue;
+            };
             let row_subviews = row_view.arrangedSubviews();
+            if row_subviews.count() < ROW_SUBVIEW_COUNT {
+                continue;
+            }
 
-            let label_field: Retained<NSTextField> = row_subviews.objectAtIndex(1).downcast().unwrap();
-            let iana_combo: Retained<NSComboBox> = row_subviews.objectAtIndex(2).downcast().unwrap();
+            let star: Retained<NSButton> =
+                row_subviews.objectAtIndex(IDX_STAR).downcast().unwrap();
+            let label_field: Retained<NSTextField> =
+                row_subviews.objectAtIndex(IDX_LABEL).downcast().unwrap();
+            let iana_combo: Retained<NSComboBox> =
+                row_subviews.objectAtIndex(IDX_TIMEZONE).downcast().unwrap();
 
             let label = label_field.stringValue().to_string();
             let raw_value = iana_combo.stringValue().to_string();
             let iana_id = search::iana_id_from_display(&raw_value);
+            let favorite = star.state() == NSControlStateValueOn;
 
             if iana_id.is_empty() {
                 continue;
             }
-            if let Some(entry) = TimezoneEntry::try_new(&label, iana_id) {
+            if let Some(entry) = TimezoneEntry::try_new(&label, iana_id, favorite) {
                 entries.push(entry);
             }
         }
@@ -371,6 +524,55 @@ impl PrefsController {
         settings::save_entries(&entries);
         (ivars.on_save)();
     }
+}
+
+fn add_width_constraint(view: &NSView, width: f64) {
+    unsafe {
+        let constraint =
+            objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
+                view,
+                NSLayoutAttribute::Width,
+                NSLayoutRelation::Equal,
+                None,
+                NSLayoutAttribute::NotAnAttribute,
+                1.0,
+                width,
+            );
+        view.addConstraint(&*constraint);
+    }
+}
+
+fn create_star_button(
+    mtm: MainThreadMarker,
+    target: &AnyObject,
+    favorite: bool,
+) -> Retained<NSButton> {
+    let btn = NSButton::new(mtm);
+    btn.setButtonType(NSButtonType::Toggle);
+    btn.setBordered(false);
+
+    let star_empty = NSImage::imageWithSystemSymbolName_accessibilityDescription(
+        ns_string!("star"),
+        Some(ns_string!("Not favorite")),
+    );
+    let star_filled = NSImage::imageWithSystemSymbolName_accessibilityDescription(
+        ns_string!("star.fill"),
+        Some(ns_string!("Favorite")),
+    );
+    btn.setImage(star_empty.as_deref());
+    btn.setAlternateImage(star_filled.as_deref());
+
+    btn.setState(if favorite {
+        NSControlStateValueOn
+    } else {
+        NSControlStateValueOff
+    });
+
+    unsafe {
+        btn.setTarget(Some(target));
+        btn.setAction(Some(sel!(setFavorite:)));
+    }
+    btn
 }
 
 fn create_text_field(
@@ -404,23 +606,57 @@ fn create_timezone_combo(
     combo
 }
 
-fn create_button_row(mtm: MainThreadMarker, target: &PrefsController) -> Retained<NSStackView> {
-    let row = NSStackView::new(mtm);
-    row.setOrientation(NSUserInterfaceLayoutOrientation::Horizontal);
-    row.setSpacing(8.0);
+fn create_launch_at_login_checkbox(
+    mtm: MainThreadMarker,
+    target: &PrefsController,
+) -> Retained<NSButton> {
+    use objc2_service_management::{SMAppService, SMAppServiceStatus};
 
     let target_obj: &AnyObject = target;
-
-    let add_btn = unsafe {
+    let btn = unsafe {
         NSButton::buttonWithTitle_target_action(
-            ns_string!("+ Add"),
+            ns_string!("Launch at Login"),
+            Some(target_obj),
+            Some(sel!(toggleLaunchAtLogin:)),
+            mtm,
+        )
+    };
+    btn.setButtonType(NSButtonType::Switch);
+
+    let service = unsafe { SMAppService::mainAppService() };
+    let status = unsafe { service.status() };
+    btn.setState(if status == SMAppServiceStatus::Enabled {
+        NSControlStateValueOn
+    } else {
+        NSControlStateValueOff
+    });
+
+    btn
+}
+
+fn create_add_button_row(mtm: MainThreadMarker, target: &PrefsController) -> Retained<NSStackView> {
+    let target_obj: &AnyObject = target;
+    let btn = unsafe {
+        NSButton::buttonWithTitle_target_action(
+            ns_string!("＋"),
             Some(target_obj),
             Some(sel!(addEntry:)),
             mtm,
         )
     };
+    btn.setBezelStyle(objc2_app_kit::NSBezelStyle::SmallSquare);
+    btn.setBordered(false);
+    btn.setTranslatesAutoresizingMaskIntoConstraints(false);
+    add_width_constraint(&btn, 24.0);
 
-    row.addArrangedSubview(&add_btn);
+    let row = NSStackView::new(mtm);
+    row.setOrientation(NSUserInterfaceLayoutOrientation::Horizontal);
+
+    let spacer = NSView::new(mtm);
+    spacer.setTranslatesAutoresizingMaskIntoConstraints(false);
+
+    row.addArrangedSubview(&spacer);
+    row.addArrangedSubview(&btn);
 
     row
 }
@@ -547,7 +783,23 @@ define_class!(
     impl DragHandle {
         #[unsafe(method(drawRect:))]
         fn draw_rect(&self, _rect: CGRect) {
-            // Draw handle symbol (skipped for now for stability)
+            let bounds = self.bounds();
+            let color = NSColor::tertiaryLabelColor();
+            color.set();
+
+            let cx = bounds.size.width / 2.0;
+            let cy = bounds.size.height / 2.0;
+            let line_w = 8.0;
+            let spacing = 3.0;
+
+            for i in [-1.0_f64, 0.0, 1.0] {
+                let y = cy + i * spacing;
+                let path = objc2_app_kit::NSBezierPath::new();
+                path.moveToPoint(CGPoint::new(cx - line_w / 2.0, y));
+                path.lineToPoint(CGPoint::new(cx + line_w / 2.0, y));
+                path.setLineWidth(1.0);
+                path.stroke();
+            }
         }
 
         #[unsafe(method(mouseDown:))]
@@ -556,17 +808,15 @@ define_class!(
 
         #[unsafe(method(mouseDragged:))]
         unsafe fn mouse_dragged(&self, event: &objc2_app_kit::NSEvent) {
-            let _mtm = MainThreadMarker::from(self);
             let view: &NSView = self;
 
-            // Find our row index
             let mut row_idx = 0;
             if let Some(row_view) = unsafe { view.superview() } {
                 if let Some(stack_view) = unsafe { row_view.superview() } {
                     let stack: Retained<NSStackView> = stack_view.downcast().unwrap();
                     let subviews = stack.arrangedSubviews();
                     for i in 0..subviews.count() {
-                        if unsafe { subviews.objectAtIndex(i).isEqual(Some(&row_view)) } {
+                        if subviews.objectAtIndex(i).isEqual(Some(&row_view)) {
                             row_idx = i;
                             break;
                         }
@@ -574,22 +824,20 @@ define_class!(
                 }
             }
 
-            let pboard = NSPasteboard::generalPasteboard();
-            pboard.clearContents();
-            let drag_type = row_drag_type();
-            let pboard_writing = ProtocolObject::from_retained(drag_type);
-            pboard.writeObjects(&objc2_foundation::NSArray::from_retained_slice(&[pboard_writing.clone()]));
-            pboard.setString_forType(&NSString::from_str(&row_idx.to_string()), &row_drag_type());
+            let pb_item = NSPasteboardItem::new();
+            pb_item.setString_forType(&NSString::from_str(&row_idx.to_string()), &row_drag_type());
 
-            let drag_image = NSImage::initWithSize(NSImage::alloc(), CGSize::new(16.0, 16.0));
+            let pb_writer: Retained<ProtocolObject<dyn objc2_app_kit::NSPasteboardWriting>> =
+                ProtocolObject::from_retained(pb_item);
+            let item = NSDraggingItem::initWithPasteboardWriter(NSDraggingItem::alloc(), &*pb_writer);
 
-            let item = NSDraggingItem::initWithPasteboardWriter(NSDraggingItem::alloc(), &*pboard_writing);
+            let drag_image = NSImage::initWithSize(NSImage::alloc(), CGSize::new(20.0, 20.0));
             unsafe { item.setDraggingFrame_contents(view.bounds(), Some(&drag_image)) };
 
             let items = objc2_foundation::NSArray::from_retained_slice(&[item]);
-            let dragging_source: &ProtocolObject<dyn NSDraggingSource> = ProtocolObject::from_ref(self);
+            let source: &ProtocolObject<dyn NSDraggingSource> = ProtocolObject::from_ref(self);
             unsafe {
-                let _: Retained<NSDraggingSession> = msg_send![view, beginDraggingSessionWithItems: &*items, event: event, source: dragging_source];
+                let _: Retained<NSDraggingSession> = msg_send![view, beginDraggingSessionWithItems: &*items, event: event, source: source];
             }
         }
     }

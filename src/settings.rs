@@ -11,6 +11,8 @@ struct StoredEntry {
     #[serde(default)]
     city: Option<String>,
     iana_id: String,
+    #[serde(default)]
+    favorite: bool,
 }
 
 pub fn load_entries() -> Option<Vec<TimezoneEntry>> {
@@ -23,7 +25,7 @@ pub fn load_entries() -> Option<Vec<TimezoneEntry>> {
     Some(
         stored
             .into_iter()
-            .filter_map(|s| TimezoneEntry::try_new(&s.label, &s.iana_id))
+            .filter_map(|s| TimezoneEntry::try_new(&s.label, &s.iana_id, s.favorite))
             .collect(),
     )
 }
@@ -35,6 +37,7 @@ pub fn save_entries(entries: &[TimezoneEntry]) {
             label: e.label.clone(),
             city: None,
             iana_id: e.iana_id().to_string(),
+            favorite: e.favorite,
         })
         .collect();
 
