@@ -12,15 +12,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.95"
+
       - name: Install DevBuddy
         run: curl -sSL https://raw.githubusercontent.com/devbuddy/devbuddy/main/install.sh | sh
 
-      - name: bud up && bud bundle
-        shell: bash
-        run: |
-          eval "$(bud --shell-init)"
-          bud up
-          bud bundle
+      - name: bud bundle
+        run: bud bundle
 
       - uses: actions/upload-artifact@v4
         with:
