@@ -1,0 +1,28 @@
+name: Bundle
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  bundle:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.95"
+
+      - name: Install DevBuddy
+        run: curl -sSL https://raw.githubusercontent.com/devbuddy/devbuddy/main/install.sh | sh
+
+      - name: bud bundle
+        run: bud bundle
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Cadran.app
+          path: target/Cadran.app
