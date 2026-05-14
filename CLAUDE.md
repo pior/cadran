@@ -68,7 +68,7 @@ Key dependencies: `objc2` / `objc2-app-kit` (native AppKit), `jiff` (timezone/da
 - Saving triggers an immediate refresh of the menu bar display.
 - The settings window is reused if already open (not recreated).
 - Clicking outside text fields dismisses the field editor (clicking the content view background).
-- The footer shows `Cadran V1.0` and a clickable `github.com/pior/cadran` link that opens the browser.
+- The footer shows the version from `Cargo.toml` (e.g. `Cadran v0.1.0`) and a clickable `github.com/pior/cadran` link that opens the browser.
 
 ### Favorite
 
@@ -97,7 +97,7 @@ Key dependencies: `objc2` / `objc2-app-kit` (native AppKit), `jiff` (timezone/da
 - Timezone entries are stored in macOS NSUserDefaults as JSON under the key `timezone_entries`.
 - Each stored entry has: `label`, `iana_id`, and `favorite`.
 - Entries persist across app restarts.
-- On first launch with no saved data, a set of default example entries is created and saved.
+- On first launch with no saved data, a set of default example entries is created and saved, and the Settings window opens automatically.
 
 ### Lightweight Behavior
 

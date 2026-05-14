@@ -36,6 +36,9 @@ define_class!(
             let mtm = MainThreadMarker::from(self);
             self.update_display(mtm);
             self.schedule_timer(mtm);
+            if self.ivars().first_launch {
+                self.open_preferences(mtm);
+            }
         }
     }
 
@@ -81,19 +84,23 @@ struct AppDelegateIvars {
     status_item: Retained<NSStatusItem>,
     entries: RefCell<Vec<TimezoneEntry>>,
     prefs_controller: RefCell<Option<Retained<NSObject>>>,
+    first_launch: bool,
 }
 
 impl AppDelegate {
     fn new(mtm: MainThreadMarker) -> Retained<Self> {
         let status_bar = NSStatusBar::systemStatusBar();
         let status_item = status_bar.statusItemWithLength(NSVariableStatusItemLength);
+        let first_launch = settings::is_first_launch();
         let entries = settings::load_entries().unwrap_or_else(default_entries);
         settings::save_entries(&entries);
+        settings::mark_launched();
 
         let this = Self::alloc(mtm).set_ivars(AppDelegateIvars {
             status_item,
             entries: RefCell::new(entries),
             prefs_controller: RefCell::new(None),
+            first_launch,
         });
         unsafe { msg_send![super(this), init] }
     }
@@ -286,7 +293,10 @@ fn main() {
     let mtm = MainThreadMarker::new().unwrap();
 
     let app = NSApplication::sharedApplication(mtm);
-    app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+    let first_launch = settings::is_first_launch();
+    if !first_launch {
+        app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+    }
 
     // Create a main menu with an Edit menu to enable standard shortcuts like Copy/Paste
     let main_menu = NSMenu::new(mtm);

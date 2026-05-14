@@ -33,3 +33,13 @@ commands:
       cp target/release/cadran target/Cadran.app/Contents/MacOS/
       cp target/AppIcon.icns target/Cadran.app/Contents/Resources/
       echo "Built target/Cadran.app"
+
+  install:
+    desc: Build and install the app to /Applications
+    run: |
+      bud bundle
+      osascript -e 'tell application "Cadran" to quit' 2>/dev/null || true
+      rm -rf /Applications/Cadran.app
+      cp -R target/Cadran.app /Applications/Cadran.app
+      echo "Installed to /Applications/Cadran.app"
+      open /Applications/Cadran.app

@@ -799,7 +799,8 @@ fn create_footer(mtm: MainThreadMarker, target: &PrefsController) -> Retained<NS
     let font = NSFont::systemFontOfSize(NSFont::smallSystemFontSize());
     let secondary = NSColor::secondaryLabelColor();
 
-    let name = NSTextField::labelWithString(ns_string!("Cadran V1.0"), mtm);
+    let version_label = format!("Cadran v{}", env!("CARGO_PKG_VERSION"));
+    let name = NSTextField::labelWithString(&NSString::from_str(&version_label), mtm);
     name.setFont(Some(&font));
     name.setTextColor(Some(&secondary));
 

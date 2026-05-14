@@ -20,12 +20,18 @@ A lightweight multi-timezone macOS menu bar app.
 
 ## Install
 
-Requires Rust 1.75+.
+Requires macOS and Rust 1.95+.
 
 ```
 git clone https://github.com/pior/cadran.git
 cd cadran
 cargo run
+```
+
+To build and install a `.app` bundle into `/Applications` (via [DevBuddy](https://github.com/devbuddy/devbuddy)):
+
+```
+bud install
 ```
 
 ## Status

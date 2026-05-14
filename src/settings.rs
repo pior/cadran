@@ -4,6 +4,17 @@ use serde::{Deserialize, Serialize};
 use crate::timezone::TimezoneEntry;
 
 const ENTRIES_KEY: &str = "timezone_entries";
+const HAS_LAUNCHED_KEY: &str = "has_launched";
+
+pub fn is_first_launch() -> bool {
+    let defaults = NSUserDefaults::standardUserDefaults();
+    !defaults.boolForKey(&NSString::from_str(HAS_LAUNCHED_KEY))
+}
+
+pub fn mark_launched() {
+    let defaults = NSUserDefaults::standardUserDefaults();
+    defaults.setBool_forKey(true, &NSString::from_str(HAS_LAUNCHED_KEY));
+}
 
 #[derive(Serialize, Deserialize)]
 struct StoredEntry {
