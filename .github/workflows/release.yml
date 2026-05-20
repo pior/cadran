@@ -65,7 +65,11 @@ jobs:
           plutil -lint target/Cadran.app/Contents/Info.plist
           test -x target/Cadran.app/Contents/MacOS/cadran
           EXPECTED_ARCH=${{ matrix.arch == 'aarch64' && 'arm64' || 'x86_64' }}
-          file target/Cadran.app/Contents/MacOS/cadran | grep -q "Mach-O.*$EXPECTED_ARCH"
+          ACTUAL_ARCH=$(lipo -archs target/Cadran.app/Contents/MacOS/cadran)
+          if [[ "$ACTUAL_ARCH" != "$EXPECTED_ARCH" ]]; then
+            echo "::error::expected arch $EXPECTED_ARCH, got '$ACTUAL_ARCH'"
+            exit 1
+          fi
           test -f target/Cadran.app/Contents/Resources/AppIcon.icns
           plutil -p target/Cadran.app/Contents/Info.plist | grep -q "CFBundleVersion"
 
