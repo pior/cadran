@@ -1,5 +1,5 @@
-use jiff::tz::TimeZone;
 use jiff::Zoned;
+use jiff::tz::TimeZone;
 
 use crate::resolver;
 
@@ -73,6 +73,10 @@ fn relative_day_label(now: &Zoned, target: &Zoned) -> &'static str {
     } else {
         ""
     }
+}
+
+pub fn default_entries() -> Vec<TimezoneEntry> {
+    vec![TimezoneEntry::new("UTC", "UTC", true)]
 }
 
 #[cfg(test)]
@@ -162,10 +166,4 @@ mod tests {
 
         assert_eq!(relative_day_label(&now, &target), "");
     }
-}
-
-pub fn default_entries() -> Vec<TimezoneEntry> {
-    vec![
-        TimezoneEntry::new("UTC", "UTC", true),
-    ]
 }

@@ -25,14 +25,7 @@ commands:
     desc: Build the .app bundle
     run: |
       cargo build --release
-      scripts/generate-icons.sh
-      rm -rf target/Cadran.app
-      mkdir -p target/Cadran.app/Contents/MacOS
-      mkdir -p target/Cadran.app/Contents/Resources
-      cp Info.plist target/Cadran.app/Contents/
-      cp target/release/cadran target/Cadran.app/Contents/MacOS/
-      cp target/AppIcon.icns target/Cadran.app/Contents/Resources/
-      echo "Built target/Cadran.app"
+      scripts/bundle-app.sh
 
   install:
     desc: Build and install the app to /Applications

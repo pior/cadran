@@ -1,4 +1,4 @@
-use jiff::{tz, Timestamp};
+use jiff::{Timestamp, tz};
 
 use crate::resolver;
 
@@ -28,10 +28,10 @@ impl TimezoneSearch {
             if let Ok(timezone) = tz::TimeZone::get(&name) {
                 let abbreviation = timezone.to_offset_info(now).abbreviation().to_lowercase();
                 tags.push(abbreviation.clone());
-                if is_alpha_abbreviation(&abbreviation) {
-                    if let Some(family) = abbreviation_family(&abbreviation) {
-                        tags.push(family.to_string());
-                    }
+                if is_alpha_abbreviation(&abbreviation)
+                    && let Some(family) = abbreviation_family(&abbreviation)
+                {
+                    tags.push(family.to_string());
                 }
             }
             entries.push(TimezoneSearchEntry {
@@ -90,9 +90,10 @@ impl TimezoneSearchEntry {
         let fuzzy_query = compact_match_key(query);
         self.tags.iter().any(|tag| tag.contains(query))
             || (!fuzzy_query.is_empty()
-                && self.fuzzy_tags.iter().any(|tag| {
-                    tag.contains(&fuzzy_query) || is_subsequence(&fuzzy_query, tag)
-                }))
+                && self
+                    .fuzzy_tags
+                    .iter()
+                    .any(|tag| tag.contains(&fuzzy_query) || is_subsequence(&fuzzy_query, tag)))
     }
 }
 
@@ -354,7 +355,10 @@ mod tests {
     fn extract_city_from_iana_id() {
         assert_eq!(extract_city("America/New_York"), "New York");
         assert_eq!(extract_city("Asia/Tokyo"), "Tokyo");
-        assert_eq!(extract_city("America/Argentina/Rio_Gallegos"), "Rio Gallegos");
+        assert_eq!(
+            extract_city("America/Argentina/Rio_Gallegos"),
+            "Rio Gallegos"
+        );
         assert_eq!(extract_city("UTC"), "UTC");
     }
 

@@ -4,7 +4,7 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Bool, ProtocolObject, Sel};
 use objc2::sel;
 use objc2::{
-    define_class, msg_send, AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, Message,
+    AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send,
 };
 use objc2_app_kit::{
     NSBackingStoreType, NSButton, NSButtonType, NSColor, NSComboBox, NSControl, NSDragOperation,
@@ -16,7 +16,7 @@ use objc2_app_kit::{
 use objc2_app_kit::{NSControlStateValueOff, NSControlStateValueOn};
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{
-    ns_string, NSInteger, NSNotification, NSObject, NSObjectProtocol, NSString, NSURL,
+    NSInteger, NSNotification, NSObject, NSObjectProtocol, NSString, NSURL, ns_string,
 };
 
 use crate::search::{self, TimezoneSearch};
@@ -65,8 +65,7 @@ define_class!(
             let items = self.ivars().items.borrow();
             let idx = index as usize;
             if idx < items.len() {
-                Retained::autorelease_return(NSString::from_str(&items[idx])) as *mut NSString
-                    as *mut AnyObject
+                Retained::autorelease_return(NSString::from_str(&items[idx])) as *mut AnyObject
             } else {
                 std::ptr::null_mut()
             }
@@ -244,8 +243,7 @@ impl PrefsController {
             CGPoint::new(0.0, 0.0),
             CGSize::new(PREF_WINDOW_WIDTH, 400.0),
         );
-        let style =
-            NSWindowStyleMask::Titled | NSWindowStyleMask::Closable;
+        let style = NSWindowStyleMask::Titled | NSWindowStyleMask::Closable;
 
         let window = unsafe {
             NSWindow::initWithContentRect_styleMask_backing_defer(
@@ -306,39 +304,39 @@ impl PrefsController {
 
         unsafe {
             let leading = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
-                &*rows_stack, NSLayoutAttribute::Leading, NSLayoutRelation::Equal,
+                &rows_stack, NSLayoutAttribute::Leading, NSLayoutRelation::Equal,
                 Some(&*content_view), NSLayoutAttribute::Leading, 1.0, CONTENT_PADDING,
             );
             let trailing = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
-                &*rows_stack, NSLayoutAttribute::Trailing, NSLayoutRelation::Equal,
+                &rows_stack, NSLayoutAttribute::Trailing, NSLayoutRelation::Equal,
                 Some(&*content_view), NSLayoutAttribute::Trailing, 1.0, -CONTENT_PADDING,
             );
             let top = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
-                &*rows_stack, NSLayoutAttribute::Top, NSLayoutRelation::Equal,
+                &rows_stack, NSLayoutAttribute::Top, NSLayoutRelation::Equal,
                 Some(&*content_view), NSLayoutAttribute::Top, 1.0, CONTENT_PADDING,
             );
             let cb_center = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
-                &*launch_checkbox, NSLayoutAttribute::CenterX, NSLayoutRelation::Equal,
+                &launch_checkbox, NSLayoutAttribute::CenterX, NSLayoutRelation::Equal,
                 Some(&*content_view), NSLayoutAttribute::CenterX, 1.0, 0.0,
             );
             let cb_top = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
-                &*launch_checkbox, NSLayoutAttribute::Top, NSLayoutRelation::Equal,
+                &launch_checkbox, NSLayoutAttribute::Top, NSLayoutRelation::Equal,
                 Some(&*rows_stack), NSLayoutAttribute::Bottom, 1.0, SECTION_GAP,
             );
             let footer_top = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
-                &*footer, NSLayoutAttribute::Top, NSLayoutRelation::Equal,
+                &footer, NSLayoutAttribute::Top, NSLayoutRelation::Equal,
                 Some(&*launch_checkbox), NSLayoutAttribute::Bottom, 1.0, SECTION_GAP,
             );
             let footer_bottom = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
-                &*footer, NSLayoutAttribute::Bottom, NSLayoutRelation::Equal,
+                &footer, NSLayoutAttribute::Bottom, NSLayoutRelation::Equal,
                 Some(&*content_view), NSLayoutAttribute::Bottom, 1.0, -CONTENT_PADDING,
             );
             let footer_leading = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
-                &*footer, NSLayoutAttribute::Leading, NSLayoutRelation::Equal,
+                &footer, NSLayoutAttribute::Leading, NSLayoutRelation::Equal,
                 Some(&*content_view), NSLayoutAttribute::Leading, 1.0, CONTENT_PADDING,
             );
             let footer_trailing = objc2_app_kit::NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
-                &*footer, NSLayoutAttribute::Trailing, NSLayoutRelation::Equal,
+                &footer, NSLayoutAttribute::Trailing, NSLayoutRelation::Equal,
                 Some(&*content_view), NSLayoutAttribute::Trailing, 1.0, -CONTENT_PADDING,
             );
             leading.setActive(true);
@@ -369,13 +367,11 @@ impl PrefsController {
                 eprintln!("Failed to enable launch at login: {err}");
                 sender.setState(NSControlStateValueOff);
             }
-        } else {
-            if let Err(err) = unsafe { service.unregisterAndReturnError() } {
-                eprintln!("Failed to disable launch at login: {err}");
-                let status = unsafe { service.status() };
-                if status == SMAppServiceStatus::Enabled {
-                    sender.setState(NSControlStateValueOn);
-                }
+        } else if let Err(err) = unsafe { service.unregisterAndReturnError() } {
+            eprintln!("Failed to disable launch at login: {err}");
+            let status = unsafe { service.status() };
+            if status == SMAppServiceStatus::Enabled {
+                sender.setState(NSControlStateValueOn);
             }
         }
     }
@@ -466,7 +462,7 @@ impl PrefsController {
                 1.0,
                 0.0
             );
-            row_stack.addConstraint(&*constraint);
+            row_stack.addConstraint(&constraint);
         }
 
         // Insert before the "Add" button (last arranged subview)
@@ -521,7 +517,7 @@ impl PrefsController {
             .rows_stack
             .arrangedSubviews()
             .count()
-            .saturating_sub(1) as usize
+            .saturating_sub(1)
     }
 
     fn resize_to_fit_entries(&self) {
@@ -591,13 +587,12 @@ impl PrefsController {
         combo.noteNumberOfItemsChanged();
         combo.reloadData();
 
-        if self.ivars().combo_data_source.should_show_popup(&query) {
-            if let Some(cell) = combo.cell() {
-                if cell.respondsToSelector(sel!(popUp:)) {
-                    unsafe {
-                        let _: () = msg_send![&*cell, popUp: &*combo];
-                    }
-                }
+        if self.ivars().combo_data_source.should_show_popup(&query)
+            && let Some(cell) = combo.cell()
+            && cell.respondsToSelector(sel!(popUp:))
+        {
+            unsafe {
+                let _: () = msg_send![&*cell, popUp: &*combo];
             }
         }
     }
@@ -624,11 +619,11 @@ impl PrefsController {
     }
 
     fn dismiss_combo_popup(&self, combo: &NSComboBox) {
-        if let Some(cell) = combo.cell() {
-            if cell.respondsToSelector(sel!(dismissPopUp:)) {
-                unsafe {
-                    let _: () = msg_send![&*cell, dismissPopUp: &*combo];
-                }
+        if let Some(cell) = combo.cell()
+            && cell.respondsToSelector(sel!(dismissPopUp:))
+        {
+            unsafe {
+                let _: () = msg_send![&*cell, dismissPopUp: combo];
             }
         }
     }
@@ -651,10 +646,11 @@ impl PrefsController {
             let raw_value = iana_combo.stringValue().to_string();
             let iana_id = search::iana_id_from_display(&raw_value);
 
-            if !iana_id.is_empty() && iana_id != raw_value {
-                if let Some(entry) = TimezoneEntry::try_new("", iana_id, false) {
-                    iana_combo.setStringValue(&NSString::from_str(entry.iana_id()));
-                }
+            if !iana_id.is_empty()
+                && iana_id != raw_value
+                && let Some(entry) = TimezoneEntry::try_new("", iana_id, false)
+            {
+                iana_combo.setStringValue(&NSString::from_str(entry.iana_id()));
             }
         }
         self.do_save();
@@ -740,7 +736,6 @@ impl PrefsController {
     }
 }
 
-
 fn add_width_constraint(view: &NSView, width: f64) {
     unsafe {
         let constraint =
@@ -753,7 +748,7 @@ fn add_width_constraint(view: &NSView, width: f64) {
                 1.0,
                 width,
             );
-        view.addConstraint(&*constraint);
+        view.addConstraint(&constraint);
     }
 }
 
@@ -1100,8 +1095,8 @@ define_class!(
             let view: &NSView = self;
 
             let mut row_idx = 0;
-            if let Some(row_view) = unsafe { view.superview() } {
-                if let Some(stack_view) = unsafe { row_view.superview() } {
+            if let Some(row_view) = unsafe { view.superview() }
+                && let Some(stack_view) = unsafe { row_view.superview() } {
                     let stack: Retained<NSStackView> = stack_view.downcast().unwrap();
                     let subviews = stack.arrangedSubviews();
                     for i in 0..subviews.count() {
@@ -1111,14 +1106,13 @@ define_class!(
                         }
                     }
                 }
-            }
 
             let pb_item = NSPasteboardItem::new();
             pb_item.setString_forType(&NSString::from_str(&row_idx.to_string()), &row_drag_type());
 
             let pb_writer: Retained<ProtocolObject<dyn objc2_app_kit::NSPasteboardWriting>> =
                 ProtocolObject::from_retained(pb_item);
-            let item = NSDraggingItem::initWithPasteboardWriter(NSDraggingItem::alloc(), &*pb_writer);
+            let item = NSDraggingItem::initWithPasteboardWriter(NSDraggingItem::alloc(), &pb_writer);
 
             let drag_image = NSImage::initWithSize(NSImage::alloc(), CGSize::new(20.0, 20.0));
             unsafe { item.setDraggingFrame_contents(view.bounds(), Some(&drag_image)) };

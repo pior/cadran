@@ -11,16 +11,16 @@ use std::cell::RefCell;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, ProtocolObject, Sel};
 use objc2::sel;
-use objc2::{define_class, msg_send, DefinedClass, MainThreadMarker, MainThreadOnly};
+use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSColor, NSFont, NSMenu,
-    NSMenuItem, NSStatusBar, NSStatusItem, NSTextAlignment, NSTextField, NSVariableStatusItemLength,
-    NSView,
+    NSMenuItem, NSStatusBar, NSStatusItem, NSTextAlignment, NSTextField,
+    NSVariableStatusItemLength, NSView,
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
-use objc2_foundation::{ns_string, NSNotification, NSObject, NSObjectProtocol, NSString, NSTimer};
+use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol, NSString, NSTimer, ns_string};
 
-use timezone::{default_entries, TimezoneEntry};
+use timezone::{TimezoneEntry, default_entries};
 
 define_class!(
     #[unsafe(super(NSObject))]
@@ -111,13 +111,13 @@ impl AppDelegate {
         let now = jiff::Zoned::now();
 
         if let Some(button) = ivars.status_item.button(mtm) {
-            let display_entry = entries
-                .iter()
-                .find(|e| e.favorite)
-                .or(entries.first());
+            let display_entry = entries.iter().find(|e| e.favorite).or(entries.first());
             if let Some(entry) = display_entry {
                 let formatted = entry.format(&now);
-                button.setTitle(&NSString::from_str(&format!("\u{1F310} {}", formatted.time)));
+                button.setTitle(&NSString::from_str(&format!(
+                    "\u{1F310} {}",
+                    formatted.time
+                )));
             } else {
                 button.setTitle(ns_string!("\u{1F310}"));
             }
