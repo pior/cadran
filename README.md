@@ -20,7 +20,18 @@ A lightweight multi-timezone macOS menu bar app.
 
 ## Install
 
-Requires macOS and Rust 1.95+.
+Download the latest release from the [Releases page](https://github.com/pior/cadran/releases):
+
+- Apple Silicon: `Cadran-macos-aarch64.zip`
+- Intel: `Cadran-macos-x86_64.zip`
+
+Unzip and drag `Cadran.app` into `/Applications`.
+
+Requires macOS 13 or later.
+
+## Build from source
+
+Requires Rust 1.95+.
 
 ```
 git clone https://github.com/pior/cadran.git
